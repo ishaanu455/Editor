@@ -171,3 +171,11 @@ button.tog.on{background:#3b6fd8}
 .asset .ath{width:28px;height:28px;object-fit:contain;border-radius:4px;background:#fff;background-image:linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%),linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%);background-size:8px 8px;background-position:0 0,4px 4px;flex:none}
 
 .clip::after{content:"";position:absolute;top:0;bottom:0;right:0;width:8px;cursor:ew-resize;background:#fff4}
+
+#emtools{display:flex;gap:4px;margin:4px 0}
+#emtools input{flex:1;min-width:0}#emtools select{max-width:90px}
+.emj{display:block;font-size:11px;margin:2px 0 4px;color:#9ab}
+#emgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:2px;max-height:176px;overflow:auto;background:#12151c;border-radius:6px;padding:3px}
+#emgrid .emb{background:none;border:0;padding:2px;cursor:pointer;border-radius:5px;line-height:0}
+#emgrid .emb:hover{background:#2b3345}
+#emgrid .emb img{width:100%;aspect-ratio:1;object-fit:contain}

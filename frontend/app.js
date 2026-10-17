@@ -270,7 +270,7 @@ function render() {
     let rw = imRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = imRows.length; imRows.push(0); }
     imRows[rw] = t.start + t.dur;
     add('imi' + (t.id === selImg ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: imTop + rw * 32 + 'px' },
-      '🖼 ' + (asset(t.asset)?.name || 'missing') + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+      (t.emoji ? '' : '🖼 ') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
@@ -367,13 +367,13 @@ function addAsset(a) {
 const snapLine = document.createElement('div'); snapLine.id = 'snapline'; snapLine.hidden = true; track.appendChild(snapLine);
 const showSnapLine = v => { snapLine.hidden = false; snapLine.style.left = v * pps + 'px'; };
 const hideSnapLine = () => { snapLine.hidden = true; };
-function tlPoints(o = {}, exceptId = null) {
+function tlPoints(o = {}, exceptId = null, exceptGrp = '') {
   const pts = [0, total()], off = offsets();
   off.forEach((x, i) => { pts.push(x, x + len(clips[i])); });
   if (o.head !== false) pts.push(head);
   texts.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
   fxs.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
-  imgs.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
+  imgs.forEach(x => { if (x.id !== exceptId && !(exceptGrp && x.grp === exceptGrp)) pts.push(x.start, x.start + x.dur); });
   sfx.forEach(x => { if (x.id !== exceptId) pts.push(x.t, x.t + (asset(x.asset)?.duration || 0)); });
   return pts;
 }
@@ -1068,7 +1068,7 @@ track.addEventListener('pointerdown', e => {
   const rc = el.getBoundingClientRect(), lx = e.clientX - rc.left;
   const mode = lx < 7 ? 'l' : lx > rc.width - 7 ? 'r' : 'm';
   const x0 = e.clientX, s0 = t.start, d0 = t.dur, e0 = s0 + d0, MIN = 0.2;
-  const pts = tlPoints({}, t.id), tol = 9 / pps;   // snap points (මේ item එක හැර)
+  const pts = tlPoints({}, t.id, t.grp || ''), tol = 9 / pps;   // snap points (මේ item එක හැර)
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -1097,6 +1097,7 @@ track.addEventListener('pointerdown', e => {
       t.dur = hit ? ne - s0 : Math.max(MIN, +(d0 + dt).toFixed(2));
     }
     hit ? showSnapLine(hit.v) : hideSnapLine();
+    if (kind === 'im') syncGrpTime(t);
     el.style.left = t.start * pps + 'px'; el.style.width = Math.max(18, t.dur * pps) + 'px';
     if (isFx) syncFx(t, true); else if (kind === 'im') { syncImg(t, true); applyImg(true); } else { syncText(t, true); applyText(true); }
   };
@@ -1213,15 +1214,92 @@ async function renderTextPng(t, W) {
   return { png: c.toDataURL('image/png'), wf: c.width / W };
 }
 
+// ================= emoji (Apple style) =================
+// emoji කීපයක් එකට "group" වෙනවා: එකම size, fixed spacing, වමේ→දකුණට, group එකේ මැද = video මැද (magnetic).
+// group එක එකට move / resize / time වෙනස් වෙනවා.
+const EMGAP = 0.14, EMW = 0.22, EMMAX = 4;
+const emojiName = {};
+let emojiData = { ready: false, cats: [], items: [] }, emojiCat = '';
+const grpList = t => t.grp ? imgs.filter(x => x.grp === t.grp) : [t];
+const emChar = u => { try { return String.fromCodePoint(...u.split('-').map(h => parseInt(h, 16))); } catch { return '🙂'; } };
+const imLabel = t => t.emoji ? emChar(t.emoji) + ' ' + (emojiName[t.emoji] || 'emoji') : (asset(t.asset)?.name || 'missing');
+const grpSpan = (n, w) => n * w + (n - 1) * EMGAP * w;
+function grpCenter(list) {
+  const xs = list.map(x => x.x);
+  return { cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: list.reduce((a, x) => a + x.y, 0) / list.length };
+}
+function layoutGrp(list, cx, cy, w) {
+  const n = list.length; w = Math.max(0.03, Math.min(w, 0.96 / (n + (n - 1) * EMGAP)));
+  const step = w * (1 + EMGAP), x0 = cx - (n - 1) * step / 2;
+  list.forEach((m, i) => { m.w = +w.toFixed(4); m.x = +(x0 + i * step).toFixed(5); m.y = +cy.toFixed(5); });
+}
+function placeGrpEls(list) { for (const m of list) { const el = [...imov.children].find(e => e.dataset.id === m.id); if (el) placeImg(el, m); } }
+function syncGrpTime(t) { if (t.grp) imgs.forEach(x => { if (x.grp === t.grp && x !== t) { x.start = t.start; x.dur = t.dur; } }); }
+
+function addEmoji(u) {
+  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  const cur = curImg(), join = $('#emjoin').checked && cur && cur.emoji;
+  if (join && grpList(cur).length >= EMMAX) { toast(`Group එකක emoji ${EMMAX}ක් උපරිමයි — හිස් තැනක click කරලා අලුත් එකක් පටන් ගන්න`); return; }
+  snap('Add emoji');
+  const T = total();
+  let t;
+  if (join) {
+    const g = cur.grp || (cur.grp = uid()), list = grpList(cur), c = grpCenter(list);
+    t = normI({ id: uid(), emoji: u, grp: g, w: cur.w, op: cur.op, start: cur.start, dur: cur.dur });
+    imgs.push(t);
+    layoutGrp(grpList(t), 0.5, c.cy, cur.w);       // group එක video එකේ මැදට (X), spacing + size equal
+  } else {
+    clearSel();
+    const start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
+    t = normI({ id: uid(), emoji: u, x: 0.5, y: 0.5, w: EMW, op: 1, start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
+    imgs.push(t);
+  }
+  selImg = t.id; changed();
+  if (head < t.start || head >= t.start + t.dur) seek(t.start + 0.01);
+}
+
+function renderEmojiGrid() {
+  const g = $('#emgrid'), q = $('#emq').value.trim().toLowerCase();
+  $('#eminstall').hidden = emojiData.ready || emojiBusy;
+  if (!emojiData.ready) { g.innerHTML = ''; if (!emojiBusy) $('#emhint').textContent = 'Emoji library එක තාම install කරලා නෑ (එක පාරක් විතරයි, ~විනාඩි 2ක්).'; return; }
+  $('#emhint').textContent = '＋ click = playhead එකට add · "group" ON නම් select කරලා තියෙන emoji එකට එකතු වෙලා center වෙනවා (එකම size, fixed spacing) · preview එකේ drag/කොන් drag = group එකම move/size';
+  let items = q ? emojiData.items.filter(x => x.n.includes(q) || x.k.includes(q)) : emojiData.items.filter(x => x.c === emojiCat);
+  items = items.slice(0, q ? 160 : 600);
+  g.innerHTML = items.map(x => `<button class="emb" data-u="${x.u}" title="${esc(x.n)}"><img loading="lazy" draggable="false" src="/api/emoji/${x.u}.png" alt="${esc(emChar(x.u))}"></button>`).join('');
+}
+let emojiBusy = false;
+async function emojiInstallPoll() {   // server එකේ download job එක බලනවා
+  emojiBusy = true; $('#eminstall').hidden = true;
+  for (;;) {
+    let j; try { j = await (await fetch('/api/emoji/install')).json(); } catch { j = { status: 'error', error: 'server' }; }
+    if (j.status === 'running') { $('#emhint').textContent = `Emoji download වෙනවා… ${j.done}/${j.total || '?'}`; await sleep(1500); continue; }
+    emojiBusy = false;
+    if (j.status === 'error') { $('#emhint').textContent = 'Emoji install error: ' + j.error; $('#eminstall').hidden = false; return; }
+    await loadEmoji(); toast('Emoji library ready ✔'); return;
+  }
+}
+$('#eminstall').onclick = async () => { await fetch('/api/emoji/install', { method: 'POST' }); emojiInstallPoll(); };
+async function loadEmoji() {
+  try { emojiData = await (await fetch('/api/emoji')).json(); } catch { emojiData = { ready: false, cats: [], items: [] }; }
+  emojiData.items.forEach(x => emojiName[x.u] = x.n);
+  emojiCat = emojiData.cats[0] || '';
+  $('#emcat').innerHTML = emojiData.cats.map(c => `<option>${esc(c)}</option>`).join('');
+  renderEmojiGrid(); if (clips.length) render();
+  if (!emojiData.ready && !emojiBusy) { try { if ((await (await fetch('/api/emoji/install')).json()).status === 'running') emojiInstallPoll(); } catch {} }
+}
+$('#emcat').onchange = e => { emojiCat = e.target.value; $('#emq').value = ''; renderEmojiGrid(); };
+$('#emq').oninput = renderEmojiGrid;
+$('#emgrid').addEventListener('click', e => { const b = e.target.closest('.emb'); if (b) addEmoji(b.dataset.u); });
+
 // ================= image overlays =================
-const IMDEF = { asset: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3 };
+const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3 };
 const normI = t => ({ ...IMDEF, ...t });
 const curImg = () => imgs.find(x => x.id === selImg);
 const imov = $('#imov');
 
 function placeImg(el, t) {
   Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', width: t.w * 100 + '%' });
-  const im = el.firstChild, src = `/api/assets/${t.asset}/file`;
+  const im = el.firstChild, src = t.emoji ? `/api/emoji/${t.emoji}.png` : `/api/assets/${t.asset}/file`;
   if (im.getAttribute('src') !== src) im.src = src;
   el.classList.toggle('sel', t.id === selImg);
 }
@@ -1260,7 +1338,13 @@ function addImg(a) {
   imgs.push(t); selImg = t.id; changed();
   if (head < t.start || head >= t.start + t.dur) seek(t.start + 0.01);   // playhead එක image range එක ඇතුළට
 }
-function delImg() { if (!selImg) return; snap('Delete image'); imgs = imgs.filter(x => x.id !== selImg); selImg = null; changed(); }
+function delImg() {
+  if (!selImg) return; snap('Delete image');
+  const t = curImg(), g = t?.grp, c = g ? grpCenter(grpList(t)) : null, w = t?.w;
+  imgs = imgs.filter(x => x.id !== selImg); selImg = null;
+  if (g) { const rest = imgs.filter(x => x.grp === g); if (rest.length) layoutGrp(rest, c.cx, c.cy, w); }   // ඉතිරි emoji ටික ආයෙත් center
+  changed();
+}
 
 // ----- preview: move (magnetic: center / edges / grid) / resize (corner handles) -----
 imov.addEventListener('pointerdown', e => {
@@ -1271,31 +1355,50 @@ imov.addEventListener('pointerdown', e => {
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
   const px0 = e.clientX, py0 = e.clientY, x0 = t.x, y0 = t.y, w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
+  const isG = !!t.grp, list = grpList(t), gc = grpCenter(list);   // group = emoji කීපයක් එකට (spacing + size fixed, center)
+  const gd0 = Math.hypot(e.clientX - R.left - gc.cx * W, e.clientY - R.top - gc.cy * H) || 1;
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
     const dx = ev.clientX - px0, dy = ev.clientY - py0;
     if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
     if (!moved) { snap(handle ? 'Resize image' : 'Move image'); moved = true; }
-    if (handle) {
-      const sx = handle.includes('l') ? -1 : 1, sy = handle.includes('t') ? -1 : 1;
-      const fx = x0 * W - sx * bw / 2, fy = y0 * H - sy * bh / 2;               // opposite (fixed) corner
-      const vx = sx * bw, vy = sy * bh, px = ev.clientX - R.left - fx, py = ev.clientY - R.top - fy;
-      const k = Math.max(0.05, Math.min(10, (px * vx + py * vy) / (vx * vx + vy * vy)));
-      t.w = Math.max(0.03, Math.min(4, w0 * k));
-      const kk = t.w / w0;
-      t.x = (fx + sx * bw * kk / 2) / W; t.y = (fy + sy * bh * kk / 2) / H;
-    } else {
-      let nx = clampN(x0 + dx / W, 0, 1), ny = clampN(y0 + dy / H, 0, 1), gv = null, gh = null;
-      if (snapOn && !ev.altKey) {
-        const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
-        if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
-        const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
-        nx = a.c; ny = b.c; gv = a.line; gh = b.line;
+    if (isG) {
+      if (handle) {   // group size: group center fixed, හැම emoji එකම එකපාර
+        const k = Math.max(0.05, Math.min(10, Math.hypot(ev.clientX - R.left - gc.cx * W, ev.clientY - R.top - gc.cy * H) / gd0));
+        layoutGrp(list, gc.cx, gc.cy, w0 * k);
+      } else {        // group move: මුළු group එකම magnetic center එකට
+        let nx = clampN(gc.cx + dx / W, 0, 1), ny = clampN(gc.cy + dy / H, 0, 1), gv = null, gh = null;
+        if (snapOn && !ev.altKey) {
+          const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
+          if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+          const a = snap1(nx, grpSpan(list.length, t.w) / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
+          nx = a.c; ny = b.c; gv = a.line; gh = b.line;
+        }
+        layoutGrp(list, nx, ny, t.w); guides(gv, gh);
       }
-      t.x = nx; t.y = ny; guides(gv, gh);
+      placeGrpEls(list);
+    } else {
+      if (handle) {
+        const sx = handle.includes('l') ? -1 : 1, sy = handle.includes('t') ? -1 : 1;
+        const fx = x0 * W - sx * bw / 2, fy = y0 * H - sy * bh / 2;               // opposite (fixed) corner
+        const vx = sx * bw, vy = sy * bh, px = ev.clientX - R.left - fx, py = ev.clientY - R.top - fy;
+        const k = Math.max(0.05, Math.min(10, (px * vx + py * vy) / (vx * vx + vy * vy)));
+        t.w = Math.max(0.03, Math.min(4, w0 * k));
+        const kk = t.w / w0;
+        t.x = (fx + sx * bw * kk / 2) / W; t.y = (fy + sy * bh * kk / 2) / H;
+      } else {
+        let nx = clampN(x0 + dx / W, 0, 1), ny = clampN(y0 + dy / H, 0, 1), gv = null, gh = null;
+        if (snapOn && !ev.altKey) {
+          const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
+          if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+          const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
+          nx = a.c; ny = b.c; gv = a.line; gh = b.line;
+        }
+        t.x = nx; t.y = ny; guides(gv, gh);
+      }
+      placeImg(el, t);
     }
-    placeImg(el, t);
     if (selImg === t.id) syncImg(t, true);
     touch();
   };
@@ -1315,20 +1418,23 @@ function syncImg(t, light) {
   $('#isize').value = sz; $('#isizev').textContent = sz + '%';
   $('#iop').value = op; $('#iopv').textContent = op + '%';
   if (light) return;
-  $('#iname').textContent = asset(t.asset)?.name || 'missing';
+  const n = grpList(t).length;
+  $('#iname').textContent = imLabel(t) + (t.grp && n > 1 ? ` · group (${n})` : '');
+  $('#iungrp').hidden = !(t.grp && n > 1);
 }
-function editI(label, fn) { const t = curImg(); if (!t) return; snapT(label); fn(t); changed(); }
-$('#iop').oninput = e => editI('Image opacity', t => t.op = clampN(+e.target.value / 100, 0, 1));
-$('#isize').oninput = e => editI('Image size', t => t.w = Math.max(0.03, +e.target.value / 100));
+function editI(label, fn) { const t = curImg(); if (!t) return; snapT(label); fn(t); syncGrpTime(t); changed(); }
+$('#iop').oninput = e => editI('Image opacity', t => grpList(t).forEach(m => m.op = clampN(+e.target.value / 100, 0, 1)));
+$('#isize').oninput = e => editI('Image size', t => { const w = Math.max(0.03, +e.target.value / 100); if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, c.cy, w); } else t.w = w; });
 ['#iop', '#isize'].forEach(id => $(id).onchange = e => e.target.blur());
 $('#istart').onchange = e => editI('Image time', t => t.start = Math.max(0, +e.target.value || 0));
 $('#idur').onchange = e => editI('Image time', t => t.dur = Math.max(0.2, +e.target.value || 3));
 $('#ifit').onclick = e => { editI('Image → video end', t => { t.start = Math.min(t.start, Math.max(0, total() - MINT)); t.dur = Math.max(MINT, total() - t.start); }); e.target.blur(); };
 $('#iend').onclick = e => { editI('Image → playhead', t => { t.dur = Math.max(MINT, head - t.start); }); e.target.blur(); };
-$('#icx').onclick = e => { editI('Center image X', t => t.x = 0.5); e.target.blur(); };
-$('#icy').onclick = e => { editI('Center image Y', t => t.y = 0.5); e.target.blur(); };
-$('#idup').onclick = () => { const t = curImg(); if (!t) return; snap('Duplicate image'); const n = { ...t, id: uid(), x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; imgs.push(n); selImg = n.id; changed(); };
+$('#icx').onclick = e => { editI('Center image X', t => { if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, 0.5, c.cy, t.w); } else t.x = 0.5; }); e.target.blur(); };
+$('#icy').onclick = e => { editI('Center image Y', t => { if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, 0.5, t.w); } else t.y = 0.5; }); e.target.blur(); };
+$('#idup').onclick = () => { const t = curImg(); if (!t) return; snap('Duplicate image'); const n = { ...t, id: uid(), grp: '', x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; imgs.push(n); selImg = n.id; changed(); };
 $('#idel').onclick = () => delImg();
+$('#iungrp').onclick = () => { const t = curImg(); if (!t?.grp) return; snap('Ungroup emoji'); imgs.forEach(x => { if (x.grp === t.grp) x.grp = ''; }); changed(); };
 
 // ================= FX: grain / vintage / dust / glitch =================
 const FXN = { grain: '🎞 Grain', vintage: '📼 Vintage', dust: '✨ Dust & scratches', glitch: '📺 Glitch' };
@@ -1472,5 +1578,5 @@ $('#layout').onclick = e => { setLayout(document.body.classList.contains('pr') ?
 setLayout(localStorage.layout === 'right' ? 'right' : 'center');
 
 requestAnimationFrame(tick);
-loadAssets(); loadFonts();
+loadAssets(); loadFonts(); loadEmoji();
 goHome();

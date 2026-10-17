@@ -9,9 +9,11 @@ DATA = BASE / "data" / "projects"
 FRONT = BASE / "frontend"
 ASSETS = BASE / "data" / "assets"
 FONTS = BASE / "data" / "fonts"
+EMOJI = BASE / "data" / "emoji"   # Apple style emoji PNGs (deploy/get-emoji.py)
 DATA.mkdir(parents=True, exist_ok=True)
 ASSETS.mkdir(parents=True, exist_ok=True)
 FONTS.mkdir(parents=True, exist_ok=True)
+EMOJI.mkdir(parents=True, exist_ok=True)
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 
 app = FastAPI()
@@ -325,6 +327,113 @@ async def put_edit(pid: str, request: Request):
     return {"ok": True}
 
 
+# ---------- emoji library (Apple style PNG) ----------
+EMOJI_RE = re.compile(r"[0-9a-f]{2,8}(?:-[0-9a-f]{2,8}){0,10}")
+
+
+def emoji_path(code):
+    if not isinstance(code, str) or not EMOJI_RE.fullmatch(code):
+        return None
+    p = EMOJI / f"{code}.png"
+    return p if p.is_file() else None
+
+
+@app.get("/api/emoji")
+def emoji_index():
+    ip = EMOJI / "index.json"
+    if not ip.exists():
+        return {"ready": False, "cats": [], "items": []}
+    try:
+        return {"ready": True, **json.loads(ip.read_text(encoding="utf-8"))}
+    except ValueError:
+        return {"ready": False, "cats": [], "items": []}
+
+
+EMOJI_JOB = {"status": "idle", "done": 0, "total": 0, "error": ""}
+EMOJI_VER = "15.1.2"
+EMOJI_CDN = os.environ.get("EMOJI_CDN", "https://cdn.jsdelivr.net")   # (test වලට වෙනස් කරන්න පුළුවන්)
+
+
+def _http_get(url, timeout=30):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "aegisx-editor"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def emoji_install_job():
+    """Apple style emoji PNG library එක download කරනවා (button එකෙන් / deploy/get-emoji.py එකෙන්)"""
+    from concurrent.futures import ThreadPoolExecutor
+    J = EMOJI_JOB
+    J.update(status="running", done=0, total=0, error="")
+    try:
+        data = json.loads(_http_get(f"{EMOJI_CDN}/npm/emoji-datasource-apple@{EMOJI_VER}/emoji.json", 120))
+        data = [d for d in data if d.get("has_img_apple") and d.get("image")]
+        data.sort(key=lambda d: d.get("sort_order", 0))
+        J["total"] = len(data)
+        sources = [f"{EMOJI_CDN}/gh/iamcal/emoji-data@v{EMOJI_VER}/img-apple-160/",
+                   f"{EMOJI_CDN}/gh/iamcal/emoji-data@master/img-apple-160/",
+                   f"{EMOJI_CDN}/npm/emoji-datasource-apple@{EMOJI_VER}/img/apple/64/"]
+
+        def fetch(d):
+            stem = d["image"][:-4].lower()
+            dst = EMOJI / f"{stem}.png"
+            ok = dst.exists() and dst.stat().st_size > 100
+            if not ok:
+                for base in sources:
+                    try:
+                        b = _http_get(base + d["image"])
+                        if b[:4] == b"\x89PNG":
+                            dst.write_bytes(b)
+                            ok = True
+                            break
+                    except OSError:
+                        continue
+            J["done"] += 1
+            return stem, ok
+
+        with ThreadPoolExecutor(8) as ex:
+            res = list(ex.map(fetch, data))
+        okset = {st for st, ok in res if ok}
+        items, cats = [], []
+        for d in data:
+            stem = d["image"][:-4].lower()
+            if stem not in okset:
+                continue
+            c = d.get("category") or "Other"
+            if c not in cats:
+                cats.append(c)
+            items.append({"u": stem, "n": (d.get("name") or d["short_name"]).lower(), "c": c,
+                          "k": " ".join(d.get("short_names") or [])})
+        if not items:
+            raise RuntimeError("emoji එකක්වත් download වුනේ නෑ (internet / jsDelivr)")
+        (EMOJI / "index.json").write_text(json.dumps({"cats": cats, "items": items}, ensure_ascii=False), encoding="utf-8")
+        J["status"] = "done"
+    except Exception as e:   # noqa
+        J.update(status="error", error=str(e)[:200])
+
+
+@app.post("/api/emoji/install")
+def emoji_install():
+    if EMOJI_JOB["status"] != "running":
+        EMOJI_JOB.update(status="running", done=0, total=0, error="")
+        threading.Thread(target=emoji_install_job, daemon=True).start()
+    return EMOJI_JOB
+
+
+@app.get("/api/emoji/install")
+def emoji_install_status():
+    return EMOJI_JOB
+
+
+@app.get("/api/emoji/{code}.png")
+def emoji_file(code: str):
+    p = emoji_path(code)
+    if not p:
+        raise HTTPException(404, "emoji not found")
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
+
+
 # ---------- audio assets (SFX / music library, projects අතර share) ----------
 AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus"}
 IMG_EXT = {".png", ".jpg", ".jpeg", ".webp"}   # asset library එකේ තියෙන්න පුළුවන් (stored) formats
@@ -600,12 +709,17 @@ def sanitize_texts(raw, d: Path):
 def sanitize_imgs(raw):
     """image overlays (asset library එකේ image) -> file path + position / size / opacity / time"""
     out = []
-    for x in (raw or [])[:20]:
+    for x in (raw or [])[:60]:
         if not isinstance(x, dict):
             continue
-        p = asset_path(x.get("asset"))
-        if not p or p.suffix.lower() not in IMG_EXT:
-            continue
+        if x.get("emoji"):
+            p = emoji_path(x.get("emoji"))
+            if not p:
+                continue
+        else:
+            p = asset_path(x.get("asset"))
+            if not p or p.suffix.lower() not in IMG_EXT:
+                continue
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.05, 36000, 3)
         out.append({"path": p, "w": clamp(x.get("w"), 0.01, 4, 0.4),

@@ -44,6 +44,12 @@
     <h4>Images <label class="btn sm">+ upload<input id="up-img" type="file" accept="image/*" multiple hidden></label></h4>
     <div id="lib-img"></div>
     <p class="hint">＋ = playhead එකට image එක add · preview එකේ image එක drag = move · කොන් drag = size · Opacity = පහළ inspector එකේ · timeline එකේ Image lane එකේ magnetic snap වෙනවා</p>
+    <h4>Emoji <span class="hint" style="font-weight:400">(Apple style)</span></h4>
+    <div id="emtools"><input id="emq" type="search" placeholder="search…"><select id="emcat"></select></div>
+    <label class="emj"><input type="checkbox" id="emjoin" checked> Selected emoji එක්ක group කරන්න</label>
+    <button id="eminstall" class="sm" hidden>⬇ Apple emoji library install කරන්න</button>
+    <div id="emgrid"></div>
+    <p class="hint" id="emhint"></p>
     <h4>Effects</h4>
     <div id="fxbtns"><button data-fx="grain">🎞 Grain</button><button data-fx="vintage">📼 Vintage</button><button data-fx="dust">✨ Dust</button><button data-fx="glitch">📺 Glitch</button></div>
     <p class="hint">Timeline එකේ FX lane එකට add වෙනවා. ඇදලා ගෙනියන්න / කොන් ඇදලා දිග වෙනස් කරන්න. 🧲 Snap on නම් video end එකට ඇලෙනවා.</p>
@@ -151,7 +157,7 @@
       <label>Duration (s) <input id="idur" type="number" min="0.2" step="0.1" style="width:70px"></label>
       <button id="ifit" title="Image එකේ අග = video එකේ අග">⇥ Video end</button><button id="iend" title="Image එකේ අග = playhead">⇥ Playhead</button>
       <button id="icx" title="Horizontal center">⇔ Center X</button><button id="icy" title="Vertical center">⇕ Center Y</button>
-      <button id="idup">Duplicate</button><button id="idel">Delete image</button>
+      <button id="idup">Duplicate</button><button id="iungrp" hidden>Ungroup</button><button id="idel">Delete image</button>
     </div>
   </div>
   <div class="ig" id="i-sfx" hidden>
