@@ -376,3 +376,7 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
   #cols{gap:8px;padding:8px}
   #tl{max-height:max(140px,33vh)}
 }
+
+/* v8.1 — preview: box / border / background නැතුව සාමාන්‍යයෙන් */
+#sw{background:none;border:0;border-radius:0;padding:0}
+#stage{box-shadow:none;border-radius:0}

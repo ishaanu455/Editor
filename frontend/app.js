@@ -763,12 +763,17 @@ addEventListener('keydown', e => {
 });
 
 // ================= timeline: වමට / දකුණට scroll විතරයි (උඩ / පහළ නෑ) =================
-tl.addEventListener('wheel', e => {   // mouse wheel (උඩ/පහළ) → වමට/දකුණට scroll
+tl.addEventListener('wheel', e => {   // wheel: lanes උඩ/පහළ overflow නම් → උඩ/පහළ scroll; නැත්නම් / Shift ඔබා ඇත්නම් → වමට/දකුණට
   if (e.ctrlKey) return;
+  const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+  const canV = tl.scrollHeight > tl.clientHeight + 1;
+  if (canV && !e.shiftKey && !horiz) {   // native vertical scroll (flicker නෑ)
+    const atTop = tl.scrollTop <= 0 && e.deltaY < 0, atBot = tl.scrollTop + tl.clientHeight >= tl.scrollHeight - 1 && e.deltaY > 0;
+    if (!atTop && !atBot) return;        // browser එකම scroll කරයි
+  }
   e.preventDefault();
-  tl.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  tl.scrollLeft += horiz ? e.deltaX : e.deltaY;
 }, { passive: false });
-tl.addEventListener('scroll', () => { if (tl.scrollTop) tl.scrollTop = 0; });
 
 // ================= main item: link / unlink · mute · extract audio · replace =================
 const errText = t => { try { return JSON.parse(t).detail || t; } catch { return String(t).slice(0, 120); } };
