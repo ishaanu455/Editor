@@ -380,3 +380,10 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
 /* v8.1 — preview: box / border / background නැතුව සාමාන්‍යයෙන් */
 #sw{background:none;border:0;border-radius:0;padding:0}
 #stage{box-shadow:none;border-radius:0}
+
+/* v9.1 — පොඩි emoji / image වල resize handles ඇතුළත නෙවෙයි, corner වලින් පිටතට (item එක වැහෙන්නේ නෑ) */
+.im .th,.tx .th{width:11px;height:11px}
+.th[data-h=tl]{left:-6px;top:-6px}.th[data-h=tr]{right:-6px;top:-6px}
+.th[data-h=bl]{left:-6px;bottom:-6px}.th[data-h=br]{right:-6px;bottom:-6px}
+.im.sel,.tx.sel{outline-offset:2px}
+.im img{image-rendering:auto}
