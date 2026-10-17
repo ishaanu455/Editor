@@ -1,0 +1,12 @@
+[Unit]
+Description=AegisX Editor
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/aegis-editor
+ExecStart=/opt/aegis-editor/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
