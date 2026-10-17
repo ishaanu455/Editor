@@ -1039,15 +1039,18 @@ $('#homebtn').onclick = e => { goHome(); e.target.blur(); };
 
 // ================= text layers =================
 const TXDEF = { text: 'Text', font: 'Nirmala UI', size: 0.07, bold: false, italic: false, underline: false, outline: false,
+  sw: 0, sc: '#000000', shd: 0, shc: '#000000', bg: '', bga: 0.8, brad: 0.2,
   color: '#ffffff', align: 'center', x: 0.5, y: 0.8, start: 0, dur: 3, op: 1, scr: 0, scv: 0, spd: 0.2 };
 const SYS_FONTS = ['Nirmala UI', 'Iskoola Pota', 'Noto Sans Sinhala', 'Segoe UI', 'Arial', 'Verdana', 'Georgia', 'Times New Roman', 'Impact', 'Comic Sans MS'];
 const FALLBACK = '"Nirmala UI","Iskoola Pota","Noto Sans Sinhala","Noto Sans",sans-serif';   // සිංහල glyphs නැති font වලට fallback
 const COLORS = ['#ffffff', '#000000', '#ff3b30', '#ffd60a', '#34c759', '#0a84ff', '#ff9f0a', '#ff2d92', '#bf5af2', '#00e5ff'];
 const MINT = 0.2;
-const LH = 1.4, PADK = 0.25;   // line-height / padding (em) — preview + export දෙකේම එකයි
+const LH = 1.4, PADK = 0.25;
+const padEm = t => Math.max(PADK, (+t.sw || 0) / 2 + 0.1) + (t.bg ? 0.2 : 0) + (+t.shd > 0 ? 0.33 * t.shd : 0);   // stroke / shadow / background වලට අමතර ඉඩ (preview + export එකම)
+const hexA = (h, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) return 'transparent'; const n = parseInt(m[1], 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };   // line-height / padding (em) — preview + export දෙකේම එකයි
 let txStyle = {}; try { txStyle = JSON.parse(localStorage.txStyle || '{}'); } catch {}
 let snapOn = localStorage.snap !== '0', gridOn = localStorage.grid === '1';
-const normT = t => ({ ...TXDEF, ...t });
+const normT = t => { const o = { ...TXDEF, ...t }; if (t.sw === undefined && t.outline) o.sw = 0.14; return o; };   // පරණ "Outline" → stroke 14%
 const curText = () => texts.find(x => x.id === selText);
 const fam = f => `"${f}",${FALLBACK}`;
 const cssFont = (t, px) => `${t.italic ? 'italic ' : ''}${t.bold ? 'bold ' : ''}${px}px ${fam(t.font)}`;
@@ -1066,14 +1069,17 @@ async function loadFonts() {
 
 function placeEl(el, t, W) {
   const px = t.size * W;
-  Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: PADK + 'em',
+  Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: padEm(t) + 'em',
     fontFamily: fam(t.font), fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? 'italic' : 'normal', color: t.color, textAlign: t.align });
   if (scrDir(t)) el.style.left = dispX(t, el._wf || 0.2) * 100 + '%';
   if (scrV(t)) el.style.top = dispY(t, el._hf || 0.1) * 100 + '%';
   el._xl = null; el._yl = null;
   const tt = el.firstChild;
   tt.style.textDecoration = t.underline ? 'underline' : 'none';
-  tt.style.webkitTextStroke = t.outline ? `${0.14 * px}px #000` : '0';
+  tt.style.webkitTextStroke = t.sw > 0.001 ? `${t.sw * px}px ${t.sc}` : '0';
+  tt.style.textShadow = t.shd > 0 ? `0 ${0.08 * t.shd * px}px ${0.25 * t.shd * px}px ${t.shc}` : 'none';
+  el.style.background = t.bg ? hexA(t.bg, t.bga) : 'none';
+  el.style.borderRadius = t.bg ? t.brad + 'em' : '0';
   if (tt.textContent !== t.text) tt.textContent = t.text;
   el.classList.toggle('sel', t.id === selText);
 }
@@ -1251,7 +1257,7 @@ track.addEventListener('pointerdown', e => {
 let lastSnapL = '', lastSnapT = 0;
 function snapT(label) { const n = Date.now(); if (label !== lastSnapL || n - lastSnapT > 1000) snap(label); lastSnapL = label; lastSnapT = n; }
 function remember(t) {
-  txStyle = { font: t.font, size: t.size, bold: t.bold, italic: t.italic, underline: t.underline, outline: t.outline, color: t.color, align: t.align };
+  txStyle = { font: t.font, size: t.size, bold: t.bold, italic: t.italic, underline: t.underline, outline: t.outline, sw: t.sw, sc: t.sc, shd: t.shd, shc: t.shc, bg: t.bg, bga: t.bga, brad: t.brad, color: t.color, align: t.align };
   localStorage.txStyle = JSON.stringify(txStyle);
 }
 function syncText(t, light) {   // light = drag වෙලාවේ number inputs විතරයි
@@ -1263,6 +1269,13 @@ function syncText(t, light) {   // light = drag වෙලාවේ number inputs
   $('#tpx').value = tx; $('#tpxv').textContent = tx + '%'; $('#tpy').value = ty; $('#tpyv').textContent = ty + '%';
   $('#tspd').value = ts; $('#tspdv').textContent = ts + '%/s'; $('#tspd').disabled = !(td || tv);
   [['#tscr0', !td && !tv], ['#tscrL', td < 0], ['#tscrR', td > 0], ['#tscrU', tv < 0], ['#tscrD', tv > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
+  const sw = Math.round((t.sw || 0) * 100), sd = Math.round((t.shd || 0) * 100), ba = Math.round((t.bga ?? 0.8) * 100), br = Math.round((t.brad ?? 0.2) * 100);
+  $('#tsw').value = sw; $('#tswv').textContent = sw + '%'; $('#tshd').value = sd; $('#tshdv').textContent = sd + '%';
+  $('#tbga').value = ba; $('#tbgav').textContent = ba + '%'; $('#tbrad').value = br; $('#tbradv').textContent = br + '%';
+  [['sc', 'tsc'], ['shc', 'tshc'], ['bg', 'tbgc']].forEach(([k, id]) => {
+    document.querySelectorAll('#' + id + ' button').forEach(b => b.classList.toggle('on', b.dataset.c === (t[k] || '')));
+    const ci = $('#' + id + ' input'); if (ci && t[k]) ci.value = t[k];
+  });
   if (light) return;
   if ($('#ttext').value !== t.text) $('#ttext').value = t.text;
   const mine = fonts.map(f => `<option value="uf_${f.id}">${esc(f.name)}</option>`).join('');
@@ -1270,11 +1283,25 @@ function syncText(t, light) {   // light = drag වෙලාවේ number inputs
   $('#tfont').innerHTML = (mine ? `<optgroup label="My fonts">${mine}</optgroup>` : '') + `<optgroup label="System">${sys}</optgroup>`;
   $('#tfont').value = t.font;
   $('#tfdel').hidden = !t.font.startsWith('uf_');
-  [['#tb', t.bold], ['#ti', t.italic], ['#tu', t.underline], ['#toutl', t.outline]].forEach(([id, on]) => $(id).classList.toggle('on', !!on));
+  [['#tb', t.bold], ['#ti', t.italic], ['#tu', t.underline], ['#toutl', t.sw > 0.001]].forEach(([id, on]) => $(id).classList.toggle('on', !!on));
   document.querySelectorAll('[data-al]').forEach(b => b.classList.toggle('on', b.dataset.al === t.align));
   document.querySelectorAll('#tcolors button').forEach(b => b.classList.toggle('on', b.dataset.c === t.color));
   $('#tcolor').value = t.color;
 }
+const CSW = [['#000000', 'Black'], ['#ffffff', 'White']];
+function mkColors(id, key, label, none) {
+  const el = $('#' + id);
+  el.innerHTML = (none ? `<button class="none" data-c="" title="No background">None</button>` : '') + CSW.map(([c, n]) => `<button data-c="${c}" style="background:${c}" title="${n}"></button>`).join('') + `<input type="color" class="cc" value="#000000" title="Custom color">`;
+  const set = c => editT(label, t => { t[key] = c; if (key === 'bg' && c && !(t.bga > 0)) t.bga = 0.8; });
+  el.onclick = e => { const b = e.target.closest('button'); if (b) set(b.dataset.c); };
+  el.querySelector('input').oninput = e => set(e.target.value);
+}
+mkColors('tsc', 'sc', 'Stroke color'); mkColors('tshc', 'shc', 'Shadow color'); mkColors('tbgc', 'bg', 'Background color', true);
+$('#tsw').oninput = e => editT('Stroke width', t => { t.sw = +e.target.value / 100; t.outline = false; });
+$('#tshd').oninput = e => editT('Shadow', t => t.shd = +e.target.value / 100);
+$('#tbga').oninput = e => editT('Background opacity', t => t.bga = +e.target.value / 100);
+$('#tbrad').oninput = e => editT('Background corners', t => t.brad = +e.target.value / 100);
+['#tsw', '#tshd', '#tbga', '#tbrad'].forEach(id => $(id).onchange = e => e.target.blur());
 $('#tcolors').innerHTML = COLORS.map(c => `<button data-c="${c}" style="background:${c}" title="${c}"></button>`).join('');
 function editT(label, fn) { const t = curText(); if (!t) return; snapT(label); fn(t); remember(t); changed(); }
 $('#ttext').oninput = e => editT('Edit text', t => t.text = e.target.value);
@@ -1282,7 +1309,7 @@ $('#tfont').onchange = e => editT('Text font', t => t.font = e.target.value);
 $('#tb').onclick = () => editT('Bold', t => t.bold = !t.bold);
 $('#ti').onclick = () => editT('Italic', t => t.italic = !t.italic);
 $('#tu').onclick = () => editT('Underline', t => t.underline = !t.underline);
-$('#toutl').onclick = () => editT('Outline', t => t.outline = !t.outline);
+$('#toutl').onclick = () => editT('Outline', t => { t.sw = t.sw > 0.001 ? 0 : 0.14; t.outline = false; });
 document.querySelectorAll('[data-al]').forEach(b => b.onclick = () => editT('Align', t => t.align = b.dataset.al));
 $('#tsize').oninput = e => editT('Text size', t => t.size = +e.target.value / 100);
 $('#topac').oninput = e => editT('Text opacity', t => t.op = Math.max(0, Math.min(1, +e.target.value / 100)));
@@ -1361,14 +1388,22 @@ async function renderTextPng(t, W) {
   g.font = cssFont(t, px);
   const lines = t.text.split('\n'), ws = lines.map(l => g.measureText(l).width), maxw = Math.max(...ws);
   const m = g.measureText('Hg'), A = m.fontBoundingBoxAscent ?? px * 0.95, D = m.fontBoundingBoxDescent ?? px * 0.25;
-  const pad = PADK * px, lh = LH * px;
+  const pad = padEm(t) * px, lh = LH * px;
   c.width = Math.max(2, Math.ceil(maxw + 2 * pad)); c.height = Math.max(2, Math.ceil(lines.length * lh + 2 * pad));
   g.font = cssFont(t, px); g.textBaseline = 'alphabetic'; g.lineJoin = 'round';
+  if (t.bg) {   // background box (rounded)
+    g.fillStyle = hexA(t.bg, t.bga); const r = Math.min(t.brad * px, c.width / 2, c.height / 2);
+    g.beginPath(); g.moveTo(r, 0); g.arcTo(c.width, 0, c.width, c.height, r); g.arcTo(c.width, c.height, 0, c.height, r); g.arcTo(0, c.height, 0, 0, r); g.arcTo(0, 0, c.width, 0, r); g.closePath(); g.fill();
+  }
+  const hasSh = t.shd > 0, hasSw = t.sw > 0.001;
+  const shOn = () => { if (hasSh) { g.shadowColor = t.shc; g.shadowBlur = 0.25 * t.shd * px; g.shadowOffsetX = 0; g.shadowOffsetY = 0.08 * t.shd * px; } };
+  const shOff = () => { g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0; };
   lines.forEach((l, i) => {
     const base = pad + i * lh + (lh - (A + D)) / 2 + A;
     const x = t.align === 'left' ? pad : t.align === 'right' ? pad + maxw - ws[i] : pad + (maxw - ws[i]) / 2;
-    if (t.outline) { g.strokeStyle = '#000'; g.lineWidth = 0.14 * px; g.strokeText(l, x, base); }
-    g.fillStyle = t.color; g.fillText(l, x, base);
+    if (hasSw) { shOn(); g.strokeStyle = t.sc; g.lineWidth = t.sw * px; g.strokeText(l, x, base); shOff(); g.fillStyle = t.color; g.fillText(l, x, base); }
+    else { shOn(); g.fillStyle = t.color; g.fillText(l, x, base); shOff(); }
+    g.fillStyle = t.color;
     if (t.underline && l) g.fillRect(x, base + 0.1 * px, ws[i], Math.max(1, 0.06 * px));
   });
   return { png: c.toDataURL('image/png'), wf: c.width / W };
@@ -1634,7 +1669,8 @@ $('#idel').onclick = () => delImg();
 $('#iungrp').onclick = () => { const t = curImg(); if (!t?.grp) return; snap('Ungroup emoji'); imgs.forEach(x => { if (x.grp === t.grp) x.grp = ''; }); changed(); };
 
 // ================= FX: grain / vintage / dust / glitch =================
-const FXN = { grain: '🎞 Grain', vintage: '📼 Vintage', dust: '✨ Dust & scratches', glitch: '📺 Glitch' };
+const FXN = { grain: '🎞 Grain', vintage: '📼 Vintage', dust: '✨ Dust & scratches', glitch: '📺 Glitch', blur: '🌫 Blur (Gaussian)' };
+const MAXBLUR = 7;
 const FXDEF = { type: 'grain', start: 0, dur: 3, amt: 0.6 };
 const normF = f => ({ ...FXDEF, ...f });
 const curFx = () => fxs.find(x => x.id === selFx);
@@ -1642,9 +1678,10 @@ const curFx = () => fxs.find(x => x.id === selFx);
 function addFx(type) {
   if (!pid) { setStatus('Open a project first'); return; }
   snap('Add ' + type); clearSel();
-  const T = total(), whole = type !== 'glitch';   // grain/vintage/dust = මුළු video එකටම; glitch = playhead එකේ ඉඳන් තත්පර 1.5ක්
+  if (type === 'blur' && fxs.filter(x => x.type === 'blur').length >= MAXBLUR) { toast(`Blur: at most ${MAXBLUR} items — edit or delete one of the existing blurs`); return; }
+  const T = total(), whole = type !== 'glitch' && type !== 'blur';   // grain/vintage/dust = මුළු video එකටම; glitch / blur = playhead එකේ ඉඳන් තත්පර 1.5ක් (blur: Whole video button එකෙන් මුළු video එකටම)
   const start = whole ? 0 : Math.min(+head.toFixed(2), Math.max(0, T - 0.3));
-  const f = { id: uid(), type, start, dur: whole ? T : Math.max(0.3, Math.min(1.5, T - start)), amt: type === 'glitch' ? 0.7 : 0.6 };
+  const f = { id: uid(), type, start, dur: whole ? T : Math.max(0.3, Math.min(1.5, T - start)), amt: type === 'glitch' ? 0.7 : type === 'blur' ? 0.35 : 0.6 };
   fxs.push(f); selFx = f.id; changed();
 }
 function delFx() { if (!selFx) return; snap('Delete effect'); fxs = fxs.filter(x => x.id !== selFx); selFx = null; changed(); }
@@ -1666,7 +1703,8 @@ $('#fstart').onchange = e => editF('Effect time', f => f.start = Math.max(0, +e.
 $('#fdur').onchange = e => editF('Effect time', f => f.dur = Math.max(0.1, +e.target.value || 1));
 $('#ffull').onclick = e => { editF('Effect → whole video', f => { f.start = 0; f.dur = total(); }); e.target.blur(); };
 $('#fend').onclick = e => { editF('Effect → video end', f => { f.start = Math.min(f.start, Math.max(0, total() - 0.1)); f.dur = Math.max(0.1, total() - f.start); }); e.target.blur(); };
-$('#fdup').onclick = () => { const f = curFx(); if (!f) return; snap('Duplicate effect'); const n = { ...f, id: uid(), start: f.start + 0.3 }; fxs.push(n); selFx = n.id; changed(); };
+$('#fdup').onclick = () => { const f = curFx(); if (!f) return; snap('Duplicate effect'); if (f.type === 'blur' && fxs.filter(x => x.type === 'blur').length >= MAXBLUR) { toast(`Blur: at most ${MAXBLUR} items`); return; }
+  const n = { ...f, id: uid(), start: f.start + 0.3 }; fxs.push(n); selFx = n.id; changed(); };
 $('#fdel').onclick = () => delFx();
 
 // ----- FX preview (browser): export එකේ ffmpeg filters වලට සමාන look එකක් -----
@@ -1731,8 +1769,8 @@ function drawGlitch(cv, a, k, W, H) {   // RGB split + horizontal slice shift (v
 function applyVfx() {
   if (!fxs.length && !vfx.dirty) return;
   const off = cropMode || !clips.length, W = stage.clientWidth, H = stage.clientHeight;
-  const ga = off ? 0 : fxAt('grain'), va = off ? 0 : fxAt('vintage'), da = off ? 0 : fxAt('dust'), la = off ? 0 : fxAt('glitch');
-  vfx.dirty = !!(ga || va || da || la);
+  const ga = off ? 0 : fxAt('grain'), va = off ? 0 : fxAt('vintage'), da = off ? 0 : fxAt('dust'), la = off ? 0 : fxAt('glitch'), ba = off ? 0 : fxAt('blur');
+  vfx.dirty = !!(ga || va || da || la || ba);
   // grain
   const gr = $('#vgr');
   if (ga) {
@@ -1743,7 +1781,8 @@ function applyVfx() {
   }
   if (!!ga !== vfx.g) { vfx.g = !!ga; gr.style.display = ga ? 'block' : 'none'; }
   // vintage (video filter + vignette/warm overlay)
-  const vf = va ? `sepia(${(0.5 * va).toFixed(3)}) contrast(${(1 + 0.1 * va).toFixed(3)}) saturate(${(1 - 0.25 * va).toFixed(3)}) brightness(${(1 + 0.03 * va).toFixed(3)})` : '';
+  const vf0 = va ? `sepia(${(0.5 * va).toFixed(3)}) contrast(${(1 + 0.1 * va).toFixed(3)}) saturate(${(1 - 0.25 * va).toFixed(3)}) brightness(${(1 + 0.03 * va).toFixed(3)})` : '';
+  const vf = (vf0 + (ba ? ` blur(${(ba * 24 * W / 1080).toFixed(2)}px)` : '')).trim();   // Gaussian blur: 100% = 24px @1080 (export gblur sigma එකම)
   if (vfx.vf !== vf) { vfx.vf = vf; zw.style.filter = vf; }
   const vv = $('#vvg');
   if (vfx.va !== va) { vfx.va = va; vv.style.opacity = Math.min(1, va); }

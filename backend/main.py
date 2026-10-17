@@ -811,7 +811,8 @@ def sanitize_imgs(raw):
     return out
 
 
-FX_TYPES = {"grain", "vintage", "dust", "glitch"}
+FX_TYPES = {"grain", "vintage", "dust", "glitch", "blur"}
+MAX_BLUR = 7   # Gaussian blur items (timeline) උපරිම ගණන
 
 
 def sanitize_fxs(raw):
@@ -822,6 +823,9 @@ def sanitize_fxs(raw):
             continue
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.1, 36000, 3)
+        if x["type"] == "blur":
+            if sum(1 for o in out if o["type"] == "blur") >= MAX_BLUR:
+                continue
         out.append({"type": x["type"], "start": s0, "end": s0 + d, "amt": clamp(x.get("amt"), 0.01, 1.5, 0.6)})
     return out
 
@@ -866,6 +870,9 @@ def build_fx(vin, fxs, ow, oh, total):
             ch.append(f"{cur}[dw{i}]blend=c0_mode=screen:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[da{i}]")
             ch.append(f"[da{i}][dk{i}]blend=c0_mode=multiply:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[db{i}]")
             ch.append(f"[db{i}][sc{i}]blend=c0_mode=screen:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'{out}")
+        elif f["type"] == "blur":   # Gaussian blur (main video only — text / image overlays යටින්, ඒවාට බලපාන්නේ නෑ). 100% = sigma 24px @1080 wide
+            sg = max(0.3, a * 24 * ow / 1080)
+            ch.append(f"{cur}gblur=sigma={sg:.2f}:steps=3:enable='{en}'{out}")
         else:   # glitch: random bursts (8Hz grid) -- RGB split + horizontal slice shift
             k = "floor(t*8)"
             en = f"between(t,{f['start']:.3f},{f['end']:.3f})*lt({hx(k + '*91.7')},{0.22 + 0.4 * a:.3f})"

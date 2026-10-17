@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 <header>
@@ -73,8 +73,8 @@
       </section>
       <section class="tab" data-tab="fx" hidden>
         <h4>Effects</h4>
-        <div id="fxbtns"><button data-fx="grain">🎞 Grain</button><button data-fx="vintage">📼 Vintage</button><button data-fx="dust">✨ Dust</button><button data-fx="glitch">📺 Glitch</button></div>
-        <p class="hint">Effects are added to the FX lane of the timeline. Drag to move, drag the edges to change the length. With Snap on, they stick to the end of the video.</p>
+        <div id="fxbtns"><button data-fx="grain">🎞 Grain</button><button data-fx="vintage">📼 Vintage</button><button data-fx="dust">✨ Dust</button><button data-fx="glitch">📺 Glitch</button><button data-fx="blur" title="Gaussian blur on the main video — up to 7 items, each with its own time range">🌫 Blur</button></div>
+        <p class="hint">Effects are added to the FX lane of the timeline. <b>Blur</b> (Gaussian) blurs the main video only — add up to 7 blur items, each with its own start / length / intensity (use <b>Whole video</b> to blur everything). Drag to move, drag the edges to change the length. With Snap on, they stick to the end of the video.</p>
       </section>
       <section class="tab" data-tab="audio" hidden>
         <h4>Sound effects <label class="btn sm">＋ Upload<input id="up-sfx" type="file" accept="audio/*" multiple hidden></label></h4>
@@ -175,6 +175,17 @@
             <label>Size <input id="tsize" type="range" min="2" max="30" step="0.5"> <span id="tsizev" class="v"></span></label>
             <label>Opacity <input id="topac" type="range" min="0" max="100" step="1" value="100"> <span id="topacv" class="v"></span></label>
             <div class="swrow"><span id="tcolors"></span><input id="tcolor" type="color" class="swc" title="Custom color"></div>
+          </div>
+          <div class="ig">
+            <b>Stroke · Shadow · Background</b>
+            <label>Stroke <input id="tsw" type="range" min="0" max="40" step="1" value="0"> <span id="tswv" class="v"></span></label>
+            <div class="swrow cs" id="tsc"></div>
+            <label>Shadow <input id="tshd" type="range" min="0" max="100" step="1" value="0"> <span id="tshdv" class="v"></span></label>
+            <div class="swrow cs" id="tshc"></div>
+            <b style="margin-top:4px">Background box</b>
+            <div class="swrow cs" id="tbgc"></div>
+            <label>Opacity <input id="tbga" type="range" min="0" max="100" step="1" value="80"> <span id="tbgav" class="v"></span></label>
+            <label>Corners <input id="tbrad" type="range" min="0" max="50" step="1" value="20"> <span id="tbradv" class="v"></span></label>
           </div>
           <div class="ig">
             <b>Position</b>
@@ -301,6 +312,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
