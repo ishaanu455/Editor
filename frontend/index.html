@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <header>
@@ -75,6 +75,10 @@
   <button id="split">✂ Split (S)</button>
   <button id="del">🗑 Delete</button>
   <button id="undo">↶</button><button id="redo">↷</button>
+  <button id="linkbtn" class="tog on" title="Linked: main item එක delete කරන්න බෑ (ඉතිරි items ආරක්ෂිතයි). Unlink කළොත් main එක විතරක් delete කරන්න පුළුවන් — ඉතිරි items (text / image / FX / SFX / music) delete වෙන්නේ නෑ, duration ඒවගේම තියෙනවා">🔗 Linked</button>
+  <label class="btn" id="replbtn" title="Main video / image එක වෙනස් කරන්න — ඉතිරි items සේරම තියෙනවා">🔁 Replace main<input id="replfile" type="file" accept="video/*,image/*" hidden></label>
+  <button id="mutebtn" class="tog" title="Main video එකේ sound එක mute / unmute (preview + export)">🔊 Main sound</button>
+  <button id="extractbtn" title="Main video එකේ audio එක Music library එකට extract කරන්න">🎵 Extract audio</button>
   <span id="time">0:00.0 / 0:00.0</span>
   <button id="snapbtn" class="tog" title="Magnetic snap: timeline items + seek bar (Alt = temporarily off)">🧲 Snap</button>
   <button id="gridbtn" class="tog" title="Grid lines (thirds + center)">▦ Grid</button>
@@ -214,6 +218,6 @@
 </div></div>
 </div></div>
 <div id="toast"></div>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

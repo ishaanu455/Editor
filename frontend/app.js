@@ -4,6 +4,7 @@ const zw = $('#zw'), fxEl = $('#fx');
 let pid = null, meta = null, clips = [], sfx = [], music = null, assets = [], texts = [], fonts = [], fxs = [], imgs = [];
 let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, selImg = null, cur = 0, head = 0, playing = false, pps = 40;
 let undo = [], redo = [], saveT = null, gesture = false, zkey = '', swallow = false;
+let linked = true, mute = false;   // linked = main item delete කරන්න බෑ · mute = main video sound off
 let dirty = false, uiT = null, openTok = 0;   // dirty = save කරන්න තියෙන edit; openTok = project switch token
 const DEF = { speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, rad: 0 };   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
 let canvas = 'auto';   // output ratio: auto | orig | 'a:b'
@@ -13,7 +14,9 @@ const norm = c => ({ ...DEF, ...c, tr: { ...TRDEF, ...(c.tr || {}) } });
 
 const sp = c => c.speed || 1;
 const len = c => (c.end - c.start) / sp(c);
-const total = () => clips.reduce((a, c) => a + len(c), 0);
+// main track එක හිස් (main delete කරලා) නම් timeline එකේ දිග = ඉතිරි items වල අන්තිම කෙළවර (ඒවගේ duration වෙනස් වෙන්නේ නෑ)
+const ghostLen = () => Math.max(0, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
+const total = () => clips.length ? clips.reduce((a, c) => a + len(c), 0) : ghostLen();
 const offsets = () => { let o = 0; return clips.map(c => { const r = o; o += len(c); return r; }); };
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 const setStatus = s => $('#status').textContent = s;
@@ -91,7 +94,8 @@ function tlToClip(t) {
 }
 
 function seek(t) {
-  if (!clips.length) return;
+  if (!pid) return;
+  if (!clips.length) { head = Math.max(0, Math.min(t, total())); touchUi(); return; }   // main නැති වෙලාවේ playhead එක විතරයි
   t = Math.max(0, Math.min(t, total()));
   const { i, src } = tlToClip(t);
   cur = i; video.currentTime = src; head = t;
@@ -100,7 +104,7 @@ function seek(t) {
 }
 
 function play() {
-  if (!clips.length) return;
+  if (!clips.length) { if (pid) toast('Main item එකක් නෑ — "🔁 Replace main" වලින් video / image එකක් දාන්න'); return; }
   if (head >= total() - 0.05) seek(0);
   video.play(); playing = true; audioStart();
 }
@@ -197,6 +201,11 @@ function tick() {
     $('#time').textContent = `${fmt(head)} / ${fmt(total())}`;
     applyFx(); applyText(); applyImg();
     try { applyVfx(); } catch (err) { console.warn('fx preview', err); }
+  } else if (pid) {   // main නැත: playhead + overlays විතරක් update
+    $('#head').style.left = head * pps + 'px';
+    $('#time').textContent = `${fmt(head)} / ${fmt(total())}`;
+    applyFx(); applyText(); applyImg();
+    try { applyVfx(); } catch {}
   }
   requestAnimationFrame(tick);
 }
@@ -242,7 +251,8 @@ function syncInsp() {
 
 function render() {
   updateStage(); $('#canvas').value = canvas;
-  track.querySelectorAll('.clip,.sfx,.music,.tmark,.txi,.fxi,.imi').forEach(e => e.remove());
+  track.querySelectorAll('.clip,.sfx,.music,.tmark,.txi,.fxi,.imi,.mainph').forEach(e => e.remove());
+  video.style.visibility = clips.length ? '' : 'hidden'; video.muted = mute; syncMainBtns();
   const off = offsets(), T = total();
   const add = (cls, css, text) => {
     const d = document.createElement('div');
@@ -252,6 +262,10 @@ function render() {
   clips.forEach((c, i) => add('clip' + (i === sel ? ' sel' : ''),
     { left: off[i] * pps + 'px', width: len(c) * pps + 'px' },
     `${fmt(c.start)}→${fmt(c.end)}` + (sp(c) !== 1 ? ` · ${sp(c)}x` : '') + (c.zoom > 1 ? ` · 🔍${(+c.zoom).toFixed(1)}` : '') + (c.crop ? ' · ✂crop' : '') + (c.rad > 0 ? ' · ◜round' : '')));
+  if (!clips.length && pid) {   // main track එක හිස්: නව main video / image එකක් දාන්න placeholder
+    const ph = add('mainph', { width: Math.max(260, T * pps - 8) + 'px' }, '＋ Main video / image එකක් දාන්න (click)');
+    ph.title = 'Main item එක නෑ — ඉතිරි items සේරම තියෙනවා. අලුත් video / image එකක් දැම්මම ඒවා එහෙමම තියෙනවා.';
+  }
   clips.forEach((c, i) => {
     if (!i) return;
     const on = c.tr && c.tr.type !== 'none';
@@ -294,15 +308,15 @@ function render() {
   });
   const nf = Math.max(1, fxRows.length);
   $('#fxlane').style.top = fxTop - 2 + 'px'; $('#fxlane').style.height = nf * 32 + 2 + 'px';
-  tl.style.height = fxTop + nf * 32 + 4 + 'px';
+  track.style.height = fxTop + nf * 32 + 4 + 'px'; tl.style.height = 'auto';   // උස track එකෙන් (scrollbar එකත් එක්ක) → උඩ/පහළ scroll නෑ
   const end = Math.max(T, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
   track.style.width = Math.max(end * pps + 80, tl.clientWidth) + 'px';
   syncInsp(); renderText(); renderImgs();
 }
 
 // ================= state / undo / save =================
-const state = () => JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs });
-function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; }
+const state = () => JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs, linked, mute });
+function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; linked = o.linked !== false; mute = !!o.mute; }
 function snap(label = 'Edit') { undo.push({ s: state(), label }); redo = []; if (undo.length > 100) undo.shift(); updUndoUi(); }
 let toastT = null;
 function toast(msg) {
@@ -322,11 +336,11 @@ function save() {   // edit (clips/sfx/music/canvas) -> edit.json. keepalive: ta
   if (!pid || !dirty) return;
   dirty = false;
   fetch(`/api/projects/${pid}/edit`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, keepalive: true,
-    body: JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs }) });
+    body: JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs, linked, mute, noMain: !clips.length }) });
 }
 function saveUi() {   // playhead / timeline zoom / export settings -> ui.json ("last edited" වෙලාව වෙනස් කරන්නේ නෑ)
   clearTimeout(uiT);
-  if (!pid || !clips.length) return;
+  if (!pid) return;
   fetch(`/api/projects/${pid}/ui`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, keepalive: true,
     body: JSON.stringify({ head: +head.toFixed(2), pps, res: $('#xres').value, preset: $('#xpreset').value }) });
 }
@@ -352,7 +366,15 @@ function split() {
   clearSel(); changed();
 }
 function del() {
-  if (sel < 0 || clips.length < 2) return;
+  if (sel < 0) return;
+  if (clips.length < 2) {   // අන්තිම main item එක: Unlink කරලා නම් විතරයි delete කරන්න පුළුවන් (ඉතිරි items delete වෙන්නේ නෑ)
+    if (linked) { toast('🔗 Linked — main item එක delete කරන්න මුලින් "Linked" button එක එබුවා Unlink කරන්න'); return; }
+    if (playing) pause();
+    snap('Delete main'); const keep = head;
+    clips = []; clearSel(); zkey = ''; changed(); seek(Math.min(keep, total()));
+    toast('Main item delete උනා · ඉතිරි items (text / image / FX / SFX / music) එහෙමම තියෙනවා — "🔁 Replace main" වලින් අලුත් main එකක් දාන්න');
+    return;
+  }
   snap('Delete clip');
   const keep = head;
   clips.splice(sel, 1); clearSel();
@@ -363,7 +385,7 @@ function delSfx() {
   snap('Delete SFX'); sfx = sfx.filter(x => x.id !== selSfx); selSfx = null; changed();
 }
 function addAsset(a) {
-  if (!clips.length) { setStatus('මුලින් video එකක් upload කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් video එකක් upload කරන්න'); return; }
   snap(a.kind === 'sfx' ? 'Add SFX' : 'Set music'); clearSel();
   if (a.kind === 'sfx') {
     const s = { id: uid(), asset: a.id, t: +head.toFixed(2), vol: 1 };
@@ -434,7 +456,7 @@ track.addEventListener('pointerdown', e => {
 // ----- playhead drag (seek bar එක mouse එකෙන් ඇදගෙන යන්න) -----
 const nearHead = x => Math.abs(x - head * pps) <= 6;
 track.addEventListener('pointerdown', e => {
-  if (e.button || !clips.length) return;
+  if (e.button || !pid) return;
   if (!nearHead(e.clientX - track.getBoundingClientRect().left)) return;
   e.stopImmediatePropagation(); e.preventDefault();
   swallow = true;
@@ -509,6 +531,7 @@ track.addEventListener('pointerdown', e => {
 
 track.addEventListener('click', e => {
   if (swallow) return;
+  if (e.target.closest('.mainph')) { $('#replfile').click(); return; }
   const tm = e.target.closest('.tmark');
   if (tm) { clearSel(); sel = +tm.dataset.i; seek(offsets()[sel]); render(); return; }
   const t = snapSeek((e.clientX - track.getBoundingClientRect().left) / pps, e, true);
@@ -733,6 +756,78 @@ addEventListener('keydown', e => {
   else if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); undoRedo(redo, undo, 'Redo'); }
 });
 
+// ================= timeline: වමට / දකුණට scroll විතරයි (උඩ / පහළ නෑ) =================
+tl.addEventListener('wheel', e => {   // mouse wheel (උඩ/පහළ) → වමට/දකුණට scroll
+  if (e.ctrlKey) return;
+  e.preventDefault();
+  tl.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+}, { passive: false });
+tl.addEventListener('scroll', () => { if (tl.scrollTop) tl.scrollTop = 0; });
+
+// ================= main item: link / unlink · mute · extract audio · replace =================
+const errText = t => { try { return JSON.parse(t).detail || t; } catch { return String(t).slice(0, 120); } };
+function syncMainBtns() {
+  const lb = $('#linkbtn'), mb = $('#mutebtn'), eb = $('#extractbtn'), ha = meta?.has_audio !== false;
+  lb.classList.toggle('on', linked); lb.textContent = linked ? '🔗 Linked' : '🔓 Unlinked';
+  mb.classList.toggle('on', mute); mb.textContent = mute ? '🔇 Main muted' : '🔊 Main sound';
+  mb.disabled = !pid; $('#replbtn').style.opacity = pid ? 1 : .5;
+  eb.disabled = !pid || !ha; eb.title = ha ? 'Main video එකේ audio එක Music library එකට extract කරන්න' : 'මේ main item එකේ audio නෑ';
+}
+$('#linkbtn').onclick = e => {
+  if (!pid) return;
+  snap(linked ? 'Unlink' : 'Link'); linked = !linked; changed();
+  toast(linked ? '🔗 Linked — main item එක delete කරන්න බෑ' : '🔓 Unlinked — main item එක delete කරන්න පුළුවන් · ඉතිරි items delete වෙන්නේ නෑ');
+  e.target.blur();
+};
+$('#mutebtn').onclick = e => {
+  if (!pid) return;
+  snap(mute ? 'Unmute main' : 'Mute main'); mute = !mute; changed();
+  if (mute && meta?.has_audio === false) toast('මේ main item එකේ audio නෑ');
+  e.target.blur();
+};
+$('#extractbtn').onclick = async e => {
+  e.target.blur(); if (!pid) return;
+  toast('Audio extract කරනවා…');
+  let r; try { r = await fetch(`/api/projects/${pid}/extract-audio`, { method: 'POST' }); } catch { toast('Server error'); return; }
+  if (!r.ok) { toast('Extract error: ' + errText(await r.text())); return; }
+  const a = await r.json(); await loadAssets();
+  if (!music && asset(a.id)) { addAsset(asset(a.id)); toast('🎵 Audio extract උනා — Music track එකට දැම්මා (+ library එකේ තියෙනවා)'); }
+  else toast('🎵 Audio extract උනා: ' + a.name + ' — Music library එකේ ＋ එබුවාම music එක විදියට දාන්න');
+};
+$('#replfile').onchange = e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f || !pid) return;
+  if (playing) pause();
+  const id = pid, tok = openTok, oldT = total(), keep = head, prevName = meta?.name || '';
+  const fd = new FormData(); fd.append('file', f);
+  const x = new XMLHttpRequest();
+  x.open('POST', `/api/projects/${id}/replace`);
+  x.upload.onprogress = p => setStatus(`Main upload ${Math.round(p.loaded / p.total * 100)}%`);
+  x.onerror = () => { setStatus(prevName); toast('Upload error'); };
+  x.onload = async () => {
+    if (tok !== openTok) return;
+    if (x.status !== 200) { setStatus(prevName); toast('Replace error: ' + errText(x.responseText)); return; }
+    let m = JSON.parse(x.responseText);
+    while (m.status === 'processing') {   // proxy එක හදනකල් බලාගෙන
+      setStatus('Proxy හදනවා…'); await sleep(1500);
+      if (tok !== openTok) return;
+      const r = await fetch(`/api/projects/${id}`); if (!r.ok) return;
+      m = await r.json();
+    }
+    if (tok !== openTok) return;
+    if (m.status === 'error') { setStatus(prevName); toast('Proxy error — ffmpeg install ද?'); return; }
+    meta = m; setStatus(m.name);
+    // අලුත් main = මුළු video එක (image එකක් නම් කලින් timeline එකේ දිගටම) · ඉතිරි items (text / image / FX / SFX / music) එහෙමම
+    const L = m.is_image ? Math.min(m.duration || 300, Math.max(oldT, m.default_len || 5)) : (m.duration || 5);
+    exitCrop(); undo = []; redo = []; updUndoUi();   // පරණ source එකට අදාළ undo history වලංගු නෑ
+    clips = [norm({ start: 0, end: +L.toFixed(2) })]; clearSel(); cur = 0; zkey = '';
+    video.src = `/api/projects/${id}/proxy.mp4?v=${Date.now()}`;
+    video.onloadedmetadata = () => { render(); seek(Math.min(keep, total())); };
+    dirty = true; save(); render();
+    toast('✔ Main item replace උනා — ඉතිරි items සේරම එහෙමම තියෙනවා');
+  };
+  x.send(fd);
+};
+
 // ================= asset library =================
 async function loadAssets() {
   try { assets = await (await fetch('/api/assets')).json(); } catch { return; }
@@ -776,7 +871,8 @@ $('#up-img').onchange = e => uploadAssets(e, 'image');
 
 // ================= export =================
 $('#export').onclick = async () => {
-  if (!pid || !clips.length) return;
+  if (!pid) return;
+  if (!clips.length) { toast('Main video / image එකක් නෑ — export කරන්න මුලින් එකක් දාන්න'); return; }
   clearTimeout(saveT);
   $('#dl').hidden = true;
   const renders = [];
@@ -790,7 +886,7 @@ $('#export').onclick = async () => {
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
-  const body = { clips, sfx, music, canvas, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs };
+  const body = { clips, sfx, music, canvas, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs, mute, linked };
   const r = await fetch(`/api/projects/${pid}/export`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { $('#xstat').textContent = 'Export error: ' + (await r.text()).slice(0, 120); return; }
@@ -858,7 +954,8 @@ async function openProject(id) {
   try { ui = await (await fetch(`/api/projects/${id}/ui`)).json(); } catch {}
   if (tok !== openTok) return;
   meta = m; setStatus(m.name);
-  clips = (ed.clips?.length ? ed.clips : [{ start: 0, end: m.default_len || m.duration }]).map(norm);
+  clips = (ed.clips?.length ? ed.clips : ed.noMain ? [] : [{ start: 0, end: m.default_len || m.duration }]).map(norm);
+  linked = ed.linked !== false; mute = !!ed.mute;
   sfx = ed.sfx || []; music = ed.music || null; canvas = ed.canvas || 'auto';
   texts = (ed.texts || []).map(normT);
   fxs = (ed.fxs || []).map(normF);
@@ -869,6 +966,7 @@ async function openProject(id) {
   dirty = false; exitCrop(); undo = []; redo = []; updUndoUi(); clearSel(); cur = 0; head = 0; zkey = '';
   video.src = `/api/projects/${id}/proxy.mp4`;
   video.onloadedmetadata = () => { render(); seek(Math.min(+ui.head || 0, total())); };
+  render();   // video metadata එනකන් බලන්නේ නැතුව buttons / main placeholder ටික sync කරනවා
   preloadAudio(); pollExport();
 }
 
@@ -918,7 +1016,7 @@ $('#plist').onclick = async e => {
 function goHome(msg) {
   flush();
   ++openTok; pause();
-  pid = null; meta = null; clips = []; sfx = []; music = null; texts = []; fxs = []; imgs = []; dirty = false;
+  pid = null; meta = null; clips = []; sfx = []; music = null; texts = []; fxs = []; imgs = []; dirty = false; linked = true; mute = false;
   clearSel(); exitCrop(); zkey = '';
   video.removeAttribute('src'); video.load();
   document.body.classList.add('home');
@@ -1192,7 +1290,7 @@ $('#tdup').onclick = () => { const t = curText(); if (!t) return; snap('Duplicat
 $('#tdel').onclick = () => delText();
 function delText() { if (!selText) return; snap('Delete text'); texts = texts.filter(x => x.id !== selText); selText = null; changed(); }
 $('#addtext').onclick = () => {
-  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add text'); clearSel();
   const t = normT({ ...txStyle, id: uid(), x: 0.5, y: 0.8, start: +head.toFixed(2), dur: +Math.max(0.5, Math.min(3, total() - head)).toFixed(2) });
   texts.push(t); selText = t.id; changed();
@@ -1200,7 +1298,7 @@ $('#addtext').onclick = () => {
 };
 
 $('#addscroll').onclick = () => {   // ticker: playhead එකේ ඉඳන් video end එක දක්වා, වමට scroll වෙන text එකක්
-  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add scrolling text'); clearSel();
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
   const t = normT({ ...txStyle, id: uid(), text: 'Scrolling text', x: 0.5, y: 0.9, scr: -1, spd: 0.2, start, dur: +Math.max(0.5, T - start).toFixed(2) });
@@ -1280,7 +1378,7 @@ function placeGrpEls(list) { for (const m of list) { const el = [...imov.childre
 function syncGrpTime(t) { if (t.grp) imgs.forEach(x => { if (x.grp === t.grp && x !== t) { x.start = t.start; x.dur = t.dur; } }); }
 
 function addEmoji(u) {
-  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   const cur = curImg(), join = $('#emjoin').checked && cur && cur.emoji;
   if (join && grpList(cur).length >= EMMAX) { toast(`Group එකක emoji ${EMMAX}ක් උපරිමයි — හිස් තැනක click කරලා අලුත් එකක් පටන් ගන්න`); return; }
   snap('Add emoji');
@@ -1327,7 +1425,7 @@ async function loadEmoji() {
   emojiData.items.forEach(x => emojiName[x.u] = x.n);
   emojiCat = emojiData.cats[0] || '';
   $('#emcat').innerHTML = emojiData.cats.map(c => `<option>${esc(c)}</option>`).join('');
-  renderEmojiGrid(); if (clips.length) render();
+  renderEmojiGrid(); if (pid) render();
   if (!emojiData.ready && !emojiBusy) { try { if ((await (await fetch('/api/emoji/install')).json()).status === 'running') emojiInstallPoll(); } catch {} }
 }
 $('#emcat').onchange = e => { emojiCat = e.target.value; $('#emq').value = ''; renderEmojiGrid(); };
@@ -1382,7 +1480,7 @@ function applyImg(force) {   // image එක පෙන්නන්නේ එහ�
 }
 
 function addImg(a, scroll) {
-  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add image'); clearSel();
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
   const nat = a.w && a.h ? a.w / a.h : 1, ca = canvasAspect();
@@ -1517,7 +1615,7 @@ const normF = f => ({ ...FXDEF, ...f });
 const curFx = () => fxs.find(x => x.id === selFx);
 
 function addFx(type) {
-  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  if (!pid) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add ' + type); clearSel();
   const T = total(), whole = type !== 'glitch';   // grain/vintage/dust = මුළු video එකටම; glitch = playhead එකේ ඉඳන් තත්පර 1.5ක්
   const start = whole ? 0 : Math.min(+head.toFixed(2), Math.max(0, T - 0.3));

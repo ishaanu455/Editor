@@ -152,6 +152,76 @@ async def create(bg: BackgroundTasks, file: UploadFile = File(...)):
     return m
 
 
+@app.post("/api/projects/{pid}/replace")
+async def replace_main(pid: str, bg: BackgroundTasks, file: UploadFile = File(...)):
+    """main video / image එක වෙනස් කරනවා. edit.json (text, image, FX, SFX, music) එහෙමම තියෙනවා -
+    frontend එක clips විතරක් අලුත් source එකට reset කරනවා."""
+    d = pdir(pid)
+    if JOBS.get(pid, {}).get("status") in ("queued", "running"):
+        raise HTTPException(409, "export වෙමින් පවතී")
+    ext = Path(file.filename or "v.mp4").suffix.lower() or ".mp4"
+    is_img = ext in PROJ_IMG_EXT or (file.content_type or "").startswith("image/")
+    tag = uuid.uuid4().hex[:6]
+    raw = d / (f"new_{tag}_img{ext if ext in PROJ_IMG_EXT else '.png'}" if is_img else f"new_{tag}{ext}")
+    with raw.open("wb") as f:
+        while chunk := await file.read(1 << 20):
+            f.write(chunk)
+    extra = {}
+    if is_img:
+        vid = d / f"new_{tag}_img.mp4"
+        if not image_to_video(raw, vid):
+            raw.unlink(missing_ok=True)
+            vid.unlink(missing_ok=True)
+            raise HTTPException(400, "මේ image එක read කරන්න බෑ (png/jpg/webp try කරන්න)")
+        raw.unlink(missing_ok=True)
+        raw = vid
+        extra = {"is_image": True, "default_len": IMG_PROJECT_DEFAULT}
+    pr = probe(raw)
+    if not pr["width"] or not pr["height"]:
+        raw.unlink(missing_ok=True)
+        raise HTTPException(400, "මේ file එක video/image එකක් විදියට read කරන්න බෑ")
+    with META_LOCK:
+        m = read_meta(d)
+        old = d / m.get("original", "")
+        final = d / f"original{raw.suffix}"
+        if old.exists() and old != final:
+            old.unlink(missing_ok=True)
+        os.replace(raw, final)
+        for k in ("is_image", "default_len", "migrate_failed"):
+            m.pop(k, None)
+        m.update({"original": final.name, "status": "processing", "source_name": file.filename, **pr, **extra})
+        write_meta(d, m)
+    for x in (d / "proxy.mp4", d / "thumb.jpg"):
+        x.unlink(missing_ok=True)
+    bg.add_task(make_proxy, pid)
+    return m
+
+
+@app.post("/api/projects/{pid}/extract-audio")
+def extract_audio(pid: str):
+    """main video එකේ audio එක music library එකට (mp3) extract කරනවා"""
+    d = pdir(pid)
+    m = read_meta(d)
+    src = d / m["original"]
+    if not probe(src)["has_audio"]:
+        raise HTTPException(400, "මේ video එකේ audio නෑ")
+    aid = uuid.uuid4().hex[:10]
+    out = ASSETS / f"{aid}.mp3"
+    with ffmpeg_lock:
+        try:
+            r = subprocess.run([FFMPEG, "-y", "-i", str(src), "-vn", "-map", "0:a:0", "-c:a", "libmp3lame",
+                                "-q:a", "2", "-ar", "44100", str(out)], capture_output=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired):
+            r = None
+    if r is None or r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        out.unlink(missing_ok=True)
+        raise HTTPException(500, "audio extract කරන්න බැරි වුණා")
+    base = Path(m.get("source_name") or m.get("name") or "video").stem[:48]
+    a = {"id": aid, "name": f"{base} (audio)", "kind": "music", "ext": ".mp3", "duration": probe(out)["duration"]}
+    (ASSETS / f"{aid}.json").write_text(json.dumps(a))
+    return a
+
+
 def edited_len(clips):
     try:
         return sum((c["end"] - c["start"]) / (c.get("speed") or 1) for c in clips)
@@ -1005,7 +1075,7 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     return ";".join(chains), label, vlabel
 
 
-def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None):
+def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None, mute: bool = False):
     d = DATA / pid
     job = JOBS[pid]
     with ffmpeg_lock:
@@ -1056,7 +1126,8 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                     mask_png(mp, w, h, R)
                     im["mi"], im["ph"] = nxt + len(extra), h
                     extra.append(mp)
-            graph, label, vlabel = build_graph(clips, ow, oh, info["has_audio"], sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners)
+            has_audio = bool(info["has_audio"]) and not mute   # mute = main video එකේ sound එක අයින් (SFX / music ඉතිරියි)
+            graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners)
             tmp = d / "output_tmp.mp4"
             cmd = [FFMPEG, "-y", "-i", str(src)]
             for x in sfx:
@@ -1114,7 +1185,10 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
         ed = json.loads(ep.read_text()) if ep.exists() else {}
     except ValueError:
         ed = {}
-    ed.update({"clips": clips, "sfx": sfx, "music": music, "canvas": canvas})
+    mute = bool(body.get("mute"))
+    ed.update({"clips": clips, "sfx": sfx, "music": music, "canvas": canvas, "mute": mute})
+    if "linked" in body:
+        ed["linked"] = bool(body.get("linked"))
     layers = body.get("layers")
     if isinstance(layers, list) and len(layers) <= 100 and all(isinstance(x, dict) for x in layers):
         ed["texts"] = layers
@@ -1132,7 +1206,7 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
     width = width if 240 <= width <= 4320 else 0
     preset = body.get("preset") if body.get("preset") in ("veryfast", "medium") else "veryfast"
     JOBS[pid] = {"status": "queued", "progress": 0, "error": ""}
-    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs)
+    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs, mute)
     return JOBS[pid]
 
 

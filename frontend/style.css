@@ -26,8 +26,12 @@ main{flex:1;min-height:0;display:flex;padding:8px;gap:8px}
 .ig.col{flex-direction:column;align-items:flex-start;gap:8px}
 .v{display:inline-block;min-width:44px;font-variant-numeric:tabular-nums}
 #time{margin-left:auto;font-variant-numeric:tabular-nums}
-#tl{height:180px;overflow-x:auto;background:#0d0f14;position:relative;flex:none}
-#track{position:relative;height:100%;min-width:100%}
+/* timeline: වමට/දකුණට scroll විතරයි (උඩ/පහළ scroll නෑ) — track එකේ උස JS එකෙන් set වෙනවා, #tl එක auto (scrollbar එකත් එක්ක) */
+#tl{height:auto;min-height:60px;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;background:#0d0f14;position:relative;flex:none}
+#track{position:relative;height:216px;min-width:100%}
+.mainph{position:absolute;top:6px;height:58px;left:4px;min-width:260px;border:2px dashed #4f86f5;border-radius:5px;color:#9db8f5;display:flex;align-items:center;justify-content:center;padding:0 14px;font-size:12px;cursor:pointer;z-index:3;white-space:nowrap;background:#3b6fd822}
+.mainph:hover{background:#3b6fd844}
+#replbtn{font-size:14px}
 .lane{position:absolute;left:0;right:0;background:#161922;pointer-events:none}
 .lane span{font-size:10px;color:#566;padding-left:4px;position:sticky;left:0}
 .clip,.sfx,.music{position:absolute;border:1px solid #0d0f14;border-radius:5px;overflow:hidden;font-size:11px;padding:3px 6px;white-space:nowrap;cursor:pointer}
