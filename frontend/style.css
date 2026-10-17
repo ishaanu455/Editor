@@ -387,3 +387,7 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
 .th[data-h=bl]{left:-6px;bottom:-6px}.th[data-h=br]{right:-6px;bottom:-6px}
 .im.sel,.tx.sel{outline-offset:2px}
 .im img{image-rendering:auto}
+
+/* v10 — magnetic guide lines / grid lines: ".v" (value label) rule එකෙන් min-width:44px ලැබී ඝන වෙනවා → නිවැරදි කළා */
+.gl.v,#gridov i.v{min-width:0!important;width:1px!important;display:block}
+.gl.h,#gridov i.h{min-height:0;height:1px!important}
