@@ -322,3 +322,57 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
 .seg5{grid-template-columns:repeat(5,minmax(0,1fr))}
 .seg5 button{min-width:0;padding:6px 0!important;font-size:11.5px!important}
 #eminstall{width:100%;padding:8px;margin-bottom:8px;font-size:12.5px}
+
+/* =====================================================================
+   v8 — preview on the RIGHT (full height), panels top-left, timeline bottom-left
+   [ library | inspector | PREVIEW ]
+   [   timeline (cols 1-2)  | PREVIEW ]
+   ===================================================================== */
+#cols{
+  grid-template-columns:268px minmax(280px,1fr) clamp(300px,31vw,480px);
+  grid-template-rows:minmax(250px,1fr) auto;
+  overflow-x:hidden;overflow-y:auto;            /* viewport ගොඩක් පොඩි නම් panels හැකිළෙන්නේ නෑ — scroll වෙනවා */
+}
+#lib{grid-column:1;grid-row:1}
+#side{grid-column:2;grid-row:1}
+#sw{grid-column:3;grid-row:1 / 3}               /* preview: දකුණු පැත්තේ, උඩ ඉඳන් timeline එකේ පහළටම */
+#bottom{grid-column:1 / 3;grid-row:2}
+
+/* timeline: උස පොඩි screen එකකදි ගොඩක් ඉඩ කන්නේ නෑ */
+#tl{max-height:max(150px,36vh);overflow-y:auto}
+#pbar{gap:6px 10px;padding:6px 10px}
+#pbar .tgrp{flex-wrap:wrap}
+
+/* inspector: පළල නම් groups කීපයක් පෙළට (columns), පටු නම් එක column එකක් */
+#sidebody .ig.col{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));align-items:start;gap:10px}
+#sidebody .ig.col>.ig.actions{grid-column:1 / -1}
+#sidebody .ig.col>.ig{height:100%}
+
+/* emoji / library: grid එක තමන්ගේම උසට සීමා නොකර #libbody එකම scroll වෙනවා */
+#libbody{overflow-y:auto;overflow-x:hidden}
+#emgrid{max-height:none;min-height:0;overflow:visible}
+#emtools select{max-width:110px}
+#sidebody{overflow-x:hidden}
+
+/* ඉතා පටු screen (phone / tablet) — එක column එකක් */
+@media (max-width:980px){
+  body{overflow:auto;height:auto;min-height:100vh}
+  #cols{display:flex;flex-direction:column;overflow:visible}
+  #lib,#side{max-height:70vh}
+  #sw{height:60vh;flex:none}
+  #bottom{order:5}
+}
+@media (max-width:1280px) and (min-width:981px){
+  #cols{grid-template-columns:236px minmax(260px,1fr) clamp(280px,32vw,400px)}
+}
+
+/* පොඩි උසක් (laptop) — toolbar එක compact, panels වලට වැඩි ඉඩක් */
+@media (max-height:720px){
+  #pbar{padding:4px 8px;gap:4px 8px}
+  #pbar button,#pbar .btn{padding:4px 8px;font-size:12px}
+  #pbar .tgrp{gap:4px}
+  #time{padding:3px 8px;font-size:12px}
+  .zoomw input{width:70px}
+  #cols{gap:8px;padding:8px}
+  #tl{max-height:max(140px,33vh)}
+}
