@@ -6,13 +6,16 @@ let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, sel
 let undo = [], redo = [], saveT = null, gesture = false, zkey = '', swallow = false;
 let linked = true, mute = false;   // linked = main item delete කරන්න බෑ · mute = main video sound off
 let dirty = false, uiT = null, openTok = 0;   // dirty = save කරන්න තියෙන edit; openTok = project switch token
-const DEF = { speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, rad: 0 };   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
+const DEF = { smooth: false, speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, rad: 0 };   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
 let canvas = 'auto';   // output ratio: auto | orig | 'a:b'
 let cropMode = false, cropIdx = -1, cb = null, cratio = null;   // crop editor state
 const TRDEF = { type: 'none', dur: 0.4, snd: null, sv: 1 };
 const norm = c => ({ ...DEF, ...c, tr: { ...TRDEF, ...(c.tr || {}) } });
 
 const sp = c => c.speed || 1;
+const SPMIN = 0.1, SPMAX = 8;   // speed slider = log scale (slow 0.1x ට හොඳ ඉඩක්)
+const spToSl = v => 100 * Math.log(Math.max(SPMIN, Math.min(SPMAX, v)) / SPMIN) / Math.log(SPMAX / SPMIN);
+const slToSp = v => { const x = SPMIN * Math.pow(SPMAX / SPMIN, v / 100); return Math.max(SPMIN, Math.min(SPMAX, x < 2 ? Math.round(x * 20) / 20 : Math.round(x * 4) / 4)); };
 const len = c => (c.end - c.start) / sp(c);
 // main track එක හිස් (main delete කරලා) නම් timeline එකේ දිග = ඉතිරි items වල අන්තිම කෙළවර (ඒවගේ duration වෙනස් වෙන්නේ නෑ)
 const ghostLen = () => Math.max(0, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
@@ -227,7 +230,7 @@ function syncInsp() {
   $('#idleh').hidden = !c || cropMode;
   $('#i-clip').hidden = !c; $('#i-sfx').hidden = !s; $('#i-music').hidden = !m;
   if (c) {
-    $('#speed').value = sp(c); $('#speedv').textContent = sp(c) + 'x';
+    $('#speed').value = spToSl(sp(c)); $('#speedv').textContent = +(+sp(c)).toFixed(2) + 'x'; $('#smooth').checked = !!c.smooth; $('#smoothrow').hidden = sp(c) >= 0.99;
     if (document.activeElement !== $('#cdur')) $('#cdur').value = len(c).toFixed(2);
     $('#czoom').value = c.zoom; $('#czoomv').textContent = (+c.zoom).toFixed(2) + 'x';
     $('#zx').value = c.zx; $('#zy').value = c.zy;
@@ -300,7 +303,7 @@ function render() {
     let rw = imRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = imRows.length; imRows.push(0); }
     imRows[rw] = t.start + t.dur;
     add('imi' + (t.id === selImg ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: imTop + rw * 32 + 'px' },
-      (t.emoji ? '' : '🖼 ') + (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? '⇡ ' : '⇣ ') : scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+      (t.emoji ? '' : asset(t.asset)?.vid ? '🎬 ' : '🖼 ') + (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? '⇡ ' : '⇣ ') : scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
@@ -702,7 +705,10 @@ $('#cdur').onchange = e => {   // clip duration (තත්පර) type කරල
   if (wantEnd > lim + 0.01) toast(`The source is only ${lim.toFixed(1)}s long — it cannot be extended further`);
   changed();
 };
-bind('#speed', () => clips[sel], 'speed', 'Clip speed'); bind('#czoom', () => clips[sel], 'zoom', 'Clip zoom');
+$('#speed').oninput = e => { const c = clips[sel]; if (!c) return; snapT('Clip speed'); c.speed = slToSp(+e.target.value); changed(); };
+$('#speed').onchange = e => e.target.blur();
+$('#smooth').onchange = e => { const c = clips[sel]; if (!c) return; snap('Smooth slow-mo'); c.smooth = e.target.checked; changed(); };
+bind('#czoom', () => clips[sel], 'zoom', 'Clip zoom');
 bind('#zx', () => clips[sel], 'zx', 'Zoom X'); bind('#zy', () => clips[sel], 'zy', 'Zoom Y');
 bind('#trdur', () => clips[sel]?.tr, 'dur', 'Transition duration'); bind('#trvol', () => clips[sel]?.tr, 'sv', 'Transition volume');
 $('#trtype').onchange = e => { if (sel < 1) return; snap('Transition'); clips[sel].tr.type = e.target.value; changed(); e.target.blur(); };
@@ -843,8 +849,8 @@ $('#replfile').onchange = e => {
 async function loadAssets() {
   try { assets = await (await fetch('/api/assets')).json(); } catch { return; }
   const mk = kind => assets.filter(a => a.kind === kind).map(a =>
-    `<div class="asset" data-id="${a.id}">${kind === 'image' ? `<img class="ath" src="/api/assets/${a.id}/file" alt="">` : ''}<span class="an" title="${esc(a.name)}">${esc(a.name)}</span>` +
-    `<button data-act="add" title="Add">＋</button>${kind === 'image' ? '<button data-act="addscr" title="Scrolling logo / image (moves left)">⇠</button>' : ''}<button data-act="del" title="Delete">✕</button></div>`).join('') || '<i class="hint">—</i>';
+    `<div class="asset" data-id="${a.id}">${kind === 'image' ? `<img class="ath" src="/api/assets/${a.id}/${a.vid ? 'thumb' : 'file'}" alt="">${a.vid ? '<span class="vbadge" title="Video">🎬</span>' : ''}` : ''}<span class="an" title="${esc(a.name)}">${esc(a.name)}</span>` +
+    `<button data-act="add" title="Add">＋</button>${kind === 'image' ? '<button data-act="addscr" title="Scrolling logo / image / video (moves left)">⇠</button>' : ''}<button data-act="del" title="Delete">✕</button></div>`).join('') || '<i class="hint">—</i>';
   $('#lib-sfx').innerHTML = mk('sfx'); $('#lib-music').innerHTML = mk('music'); $('#lib-img').innerHTML = mk('image');
   render(); preloadAudio();
 }
@@ -872,7 +878,7 @@ async function uploadAssets(e, kind) {
       toast(kind === 'image' && /audio file/.test(msg) ? 'The server is outdated: replace backend/main.py and restart it' : 'Upload error: ' + msg);
       return;
     }
-    if (kind === 'image') toast('Image added ✔ (press ＋ to put it on the timeline)');
+    if (kind === 'image') toast((/\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(f.name) ? 'Video' : 'Image') + ' added ✔ (press ＋ to put it on the timeline)');
   }
   setStatus(meta?.name || ''); loadAssets();
 }
@@ -1498,7 +1504,7 @@ function placeImg(el, t) {
   const im = el.firstChild, src = t.emoji ? `/api/emoji/${t.emoji}.png` : `/api/assets/${t.asset}/file`;
   if (im.getAttribute('src') !== src) im.src = src;
   // corner radius (px): image එකේ පොඩි පැත්තේ fraction × radius
-  const a = t.emoji ? null : asset(t.asset), ar = im.naturalWidth && im.naturalHeight ? im.naturalWidth / im.naturalHeight : a?.w && a?.h ? a.w / a.h : 1;
+  const a = t.emoji ? null : asset(t.asset), ar = (im.naturalWidth || im.videoWidth) && (im.naturalHeight || im.videoHeight) ? (im.naturalWidth || im.videoWidth) / (im.naturalHeight || im.videoHeight) : a?.w && a?.h ? a.w / a.h : 1;
   const Wp = t.w * stage.clientWidth, Rp = (+t.rad || 0) * Math.min(Wp, Wp / ar);
   im.style.borderRadius = Rp >= 0.5 ? Rp.toFixed(1) + 'px' : '0';
   el.classList.toggle('sel', t.id === selImg);
@@ -1508,11 +1514,13 @@ function renderImgs() {
   imov.hidden = cropMode;
   const have = new Map([...imov.children].map(e => [e.dataset.id, e]));
   imgs.forEach(t => {
+    const isV = !t.emoji && !!asset(t.asset)?.vid;
     let el = have.get(t.id); have.delete(t.id);
+    if (el && !!el._vid !== isV) { el.remove(); el = null; }   // assets late load වුනාම img ↔ video මාරු
     if (!el) {
-      el = document.createElement('div'); el.className = 'im'; el.dataset.id = t.id;
-      el.innerHTML = '<img draggable="false" alt="">' + ['tl', 'tr', 'bl', 'br'].map(h => `<i class="th" data-h="${h}"></i>`).join('');
-      el.firstChild.onload = () => { const m = imgs.find(x => x.id === el.dataset.id); if (m) placeImg(el, m); };   // natural size ආවම radius ආයෙත් ගණන් කරනවා
+      el = document.createElement('div'); el.className = 'im'; el.dataset.id = t.id; el._vid = isV;
+      el.innerHTML = (isV ? '<video muted loop playsinline preload="auto" draggable="false"></video>' : '<img draggable="false" alt="">') + ['tl', 'tr', 'bl', 'br'].map(h => `<i class="th" data-h="${h}"></i>`).join('');
+      el.firstChild[isV ? 'onloadedmetadata' : 'onload'] = () => { const m = imgs.find(x => x.id === el.dataset.id); if (m) placeImg(el, m); };   // natural size ආවම radius ආයෙත් ගණන් කරනවා
       imov.appendChild(el);
     }
     placeImg(el, t);
@@ -1526,6 +1534,19 @@ function applyImg(force) {   // image එක පෙන්නන්නේ එහ�
     const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selImg ? 2 : 0;
     const o = v === 2 ? 0.35 : t.op;
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
+    if (el._vid) {   // video overlay: timeline head එකට sync (play වෙද්දී play, නැත්නම් pause + seek)
+      const vv = el.firstChild, vd = vv.duration || asset(t.asset)?.duration || 0;
+      if (v === 1 && vd > 0 && isFinite(vd)) {
+        const want = Math.max(0, head - t.start) % vd;
+        if (playing) {
+          if (vv.paused) vv.play().catch(() => {});
+          if (Math.abs(vv.currentTime - want) > 0.35 && Math.abs(vv.currentTime - want) < vd - 0.35) vv.currentTime = want;
+        } else {
+          if (!vv.paused) vv.pause();
+          if (Math.abs(vv.currentTime - want) > 0.03) vv.currentTime = want;
+        }
+      } else if (!vv.paused) vv.pause();
+    }
     if (isScr(t) && v) {   // scroll: හැම frame එකකම position එක update
       const xl = dispX(t, t.w), yl = dispY(t, imHf(t));
       if (el._xl !== xl) { el._xl = xl; el.style.left = xl * 100 + '%'; }
@@ -1540,7 +1561,7 @@ function addImg(a, scroll) {
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
   const nat = a.w && a.h ? a.w / a.h : 1, ca = canvasAspect();
   let w = 0.4; if (w * ca / nat > 0.5) w = 0.5 * nat / ca;   // canvas එකේ උස භාගයකට වඩා නොවෙන්න
-  const t = normI({ id: uid(), asset: a.id, x: 0.5, y: 0.5, w: +w.toFixed(3), op: 1, start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
+  const t = normI({ id: uid(), asset: a.id, x: 0.5, y: 0.5, w: +w.toFixed(3), op: 1, start, dur: +Math.max(0.5, Math.min(a.vid ? (a.duration || 3) : 3, T - start)).toFixed(2) });
   if (scroll) {   // scrolling logo: පොඩි size, පහළට ළඟින්, video end එක දක්වා, වමට යනවා
     t.w = +Math.min(t.w, 0.2).toFixed(3); t.y = 0.9; t.scr = -1; t.spd = 0.2; t.dur = +Math.max(0.5, T - start).toFixed(2);
   }

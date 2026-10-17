@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 <header>
@@ -59,9 +59,9 @@
         <p class="hint">Drag the text in the preview to move it, drag a corner to resize, double-click to edit.<br>Scrolling text can move left, right, up or down — choose the direction, speed and position in the inspector. Use <b>Whole video</b> to keep it on screen for the entire video.</p>
       </section>
       <section class="tab" data-tab="media" hidden>
-        <h4>Images <label class="btn sm">＋ Upload<input id="up-img" type="file" accept="image/*" multiple hidden></label></h4>
+        <h4>Images &amp; videos <label class="btn sm">＋ Upload<input id="up-img" type="file" accept="image/*,video/*" multiple hidden></label></h4>
         <div id="lib-img"></div>
-        <p class="hint">＋ adds the image at the playhead · ⇠ adds it as a scrolling logo (set the direction in the inspector). Drag in the preview to move, drag a corner to resize. Items snap magnetically on the timeline.</p>
+        <p class="hint">Upload images <b>or videos</b> (mp4 / mov / webm — a video overlay plays without its own sound and loops to fill the time you give it). ＋ adds it at the playhead · ⇠ adds it as a scrolling logo (set the direction in the inspector). Drag in the preview to move, drag a corner to resize. Items snap magnetically on the timeline.</p>
       </section>
       <section class="tab" data-tab="emoji" hidden>
         <h4>Emoji <span class="hint">Apple style</span></h4>
@@ -126,8 +126,9 @@
           <div class="ig">
             <b>Clip</b>
             <label title="Clip length in seconds — an image clip can be extended up to 300s (5 min)">Duration <input id="cdur" type="number" min="0.2" step="0.1" style="width:64px"> s</label>
-            <label>Speed <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1"> <span id="speedv" class="v">1x</span></label>
-            <span class="btnrow"><button data-sp="1">1x</button> <button data-sp="2">2x</button> <button data-sp="4">4x</button> <button data-sp="8">8x</button></span>
+            <label>Speed <input id="speed" type="range" min="0" max="100" step="0.1" value="52.5"> <span id="speedv" class="v">1x</span></label>
+            <span class="btnrow"><button data-sp="0.1">0.1x</button> <button data-sp="0.25">0.25x</button> <button data-sp="0.5">0.5x</button> <button data-sp="1">1x</button> <button data-sp="2">2x</button> <button data-sp="4">4x</button> <button data-sp="8">8x</button></span>
+            <label class="chk" id="smoothrow" title="Slow motion: the editor creates in-between frames when exporting (smoother, but the export is slower). The preview does not show it." hidden><input type="checkbox" id="smooth"> Smooth slow-mo (export)</label>
           </div>
           <div class="ig">
             <b>Zoom</b>
@@ -312,6 +313,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

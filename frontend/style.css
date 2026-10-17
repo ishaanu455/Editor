@@ -400,3 +400,8 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
 .cs button.none.on{background:var(--accent2)}
 .cs input.cc{-webkit-appearance:none;appearance:none;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red)}
 .cs input.cc::-webkit-color-swatch-wrapper{padding:0}.cs input.cc::-webkit-color-swatch{border:0;border-radius:50%;opacity:0}
+
+/* v13 — video overlays */
+.im video{display:block;width:100%;height:auto;pointer-events:none;user-select:none;-webkit-user-drag:none}
+.asset{position:relative}
+.asset .vbadge{position:absolute;left:3px;bottom:2px;font-size:10px;line-height:1;pointer-events:none;text-shadow:0 0 3px #000}

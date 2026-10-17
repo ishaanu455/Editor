@@ -507,6 +507,8 @@ def emoji_file(code: str):
 # ---------- audio assets (SFX / music library, projects අතර share) ----------
 AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus"}
 IMG_EXT = {".png", ".jpg", ".jpeg", ".webp"}   # asset library එකේ තියෙන්න පුළුවන් (stored) formats
+VID_IN = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}   # media library එකට video upload කරන්න පුළුවන් (mp4 එකකට convert වෙනවා, sound නැතුව)
+VID_EXT = {".mp4"}
 IMG_IN = IMG_EXT | {".gif", ".bmp", ".tif", ".tiff", ".avif", ".heic"}   # upload කරන්න පුළුවන් formats (PNG එකකට convert වෙනවා)
 
 
@@ -529,9 +531,10 @@ def list_assets():
 @app.post("/api/assets")
 async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
     ext = Path(file.filename or "").suffix.lower()
+    isvid = kind == "image" and ext in VID_IN
     if kind == "image":
-        if ext not in IMG_IN:
-            raise HTTPException(400, "Only image files are allowed (png/jpg/webp/gif/bmp/tiff)")
+        if ext not in IMG_IN and not isvid:
+            raise HTTPException(400, "Only image or video files are allowed (png/jpg/webp/gif/bmp/tiff · mp4/mov/webm/mkv)")
     elif ext not in AUDIO_EXT:
         raise HTTPException(400, "Only audio files are allowed (mp3/wav/ogg/m4a/aac/flac)")
     aid = uuid.uuid4().hex[:10]
@@ -540,12 +543,31 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
     with path.open("wb") as f:
         while chunk := await file.read(1 << 20):
             size += len(chunk)
-            if kind == "image" and size > 25 << 20:
+            if kind == "image" and size > (400 << 20 if isvid else 25 << 20):
                 f.close()
                 path.unlink(missing_ok=True)
-                raise HTTPException(400, "The image is too large (25MB max)")
+                raise HTTPException(400, "The video is too large (400MB max)" if isvid else "The image is too large (25MB max)")
             f.write(chunk)
-    if kind == "image":
+    if isvid:
+        # video overlay: mp4 (h264, sound නැතුව, උපරිම 1280px) + poster thumbnail — preview (browser) + export දෙකටම එකම file එක
+        out = ASSETS / f"{aid}.mp4"
+        try:
+            r = subprocess.run([FFMPEG, "-y", "-i", str(path), "-an", "-vf",
+                                "scale='min(1280,iw)':-2:flags=lanczos,fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast",
+                                "-crf", "20", "-movflags", "+faststart", str(out)], capture_output=True, timeout=1800)
+        except (OSError, subprocess.TimeoutExpired):
+            r = None
+        path.unlink(missing_ok=True)
+        if r is None or r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+            out.unlink(missing_ok=True)
+            raise HTTPException(400, "This video cannot be read (try mp4 / mov / webm)")
+        try:
+            subprocess.run([FFMPEG, "-y", "-ss", "0.2", "-i", str(out), "-frames:v", "1", "-vf", "scale=96:-2", str(ASSETS / f"{aid}_thumb.jpg")],
+                           capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        path, ext = out, ".mp4"
+    elif kind == "image":
         # ඕනෑම image format එකක් -> PNG (frame 1, EXIF rotate සහිතව, උපරිම 2048px) : preview + export දෙකටම එකම file එක
         out = ASSETS / f"{aid}.png"
         try:
@@ -565,6 +587,8 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
          "ext": ext, "duration": pr["duration"]}
     if kind == "image":
         m["w"], m["h"] = pr["width"], pr["height"]
+        if isvid:
+            m["vid"] = True
     (ASSETS / f"{aid}.json").write_text(json.dumps(m))
     return m
 
@@ -577,11 +601,22 @@ def asset_file(aid: str):
     return FileResponse(p)
 
 
+@app.get("/api/assets/{aid}/thumb")
+def asset_thumb(aid: str):
+    if not asset_path(aid):
+        raise HTTPException(404, "not found")
+    t = ASSETS / f"{aid}_thumb.jpg"
+    if not t.exists():
+        raise HTTPException(404, "no thumbnail")
+    return FileResponse(t, headers={"Cache-Control": "max-age=86400"})
+
+
 @app.delete("/api/assets/{aid}")
 def delete_asset(aid: str):
     p = asset_path(aid)
     if p:
         p.unlink()
+        (ASSETS / f"{aid}_thumb.jpg").unlink(missing_ok=True)
         (ASSETS / f"{aid}.json").unlink(missing_ok=True)
     return {"ok": True}
 
@@ -727,7 +762,8 @@ def sanitize(raw, dur):
         if e - s < 0.04:
             continue
         out.append({"start": s, "end": e,
-                    "speed": clamp(c.get("speed"), 0.25, 8, 1),
+                    "speed": clamp(c.get("speed"), 0.1, 8, 1),
+                    "smooth": bool(c.get("smooth")),   # slow-mo: frame interpolation (export, slower)
                     "zoom": clamp(c.get("zoom"), 1, 4, 1),
                     "zx": clamp(c.get("zx"), 0, 1, 0.5),
                     "zy": clamp(c.get("zy"), 0, 1, 0.5),
@@ -799,7 +835,7 @@ def sanitize_imgs(raw):
                 continue
         else:
             p = asset_path(x.get("asset"))
-            if not p or p.suffix.lower() not in IMG_EXT:
+            if not p or p.suffix.lower() not in (IMG_EXT | VID_EXT):
                 continue
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.05, 36000, 3)
@@ -807,6 +843,7 @@ def sanitize_imgs(raw):
                     "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), 0, 1, 0.5),
                     "op": clamp(x.get("op"), 0, 1, 1), "rad": clamp(x.get("rad"), 0, 0.5, 0),
                     "scr": scr_dir(x.get("scr")), "scv": scr_dir(x.get("scv")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
+                    "vid": (not x.get("emoji")) and p.suffix.lower() in VID_EXT,
                     "start": s0, "end": s0 + d})
     return out
 
@@ -988,6 +1025,8 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
         else:
             v += f",scale={ow}:{oh}:flags=lanczos"
             post = ",fps=30"
+        if c.get("smooth") and c["speed"] < 0.99:   # smooth slow-mo: අතරමැදි frames හදනවා (minterpolate) — export ටිකක් ඉක්මන් අඩුයි
+            v += ",minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
         if corners and i in corners:
             # rounded corners: scale කළ video region එකේ කොන් 4ට කළු quarter-circle cutouts overlay කරනවා (pad වලට කලින්)
             ci = corners[i]
@@ -1063,14 +1102,15 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     for k, im in enumerate(imgs or []):   # image overlays: FX වලට උඩින්, text වලට යටින්
         w = max(2, round(im["w"] * ow))
         opa = f",colorchannelmixer=aa={im['op']:.3f}" if im["op"] < 0.999 else ""
+        vpre = f"setpts=PTS-STARTPTS+{im['start']:.3f}/TB," if im.get("vid") else ""   # video overlay: timeline එකේ start time එකට shift
         if im.get("mi") is not None:   # rounded corners: image alpha × rounded-rect mask
-            chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:{im['ph']}:flags=lanczos,split[ia{k}][ib{k}]")
+            chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:{im['ph']}:flags=lanczos,split[ia{k}][ib{k}]")
             chains.append(f"[ia{k}]alphaextract,format=gray[iaa{k}]")
             chains.append(f"[{im['mi']}:v]format=gray[imk{k}]")
             chains.append(f"[iaa{k}][imk{k}]blend=all_mode=multiply[ina{k}]")
             chains.append(f"[ib{k}][ina{k}]alphamerge{opa}[im{k}]")
         else:
-            chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
+            chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
         chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:{ov_y(im)}"
                       f":enable='between(t,{im['start']:.3f},{im['end']:.3f})':format=auto[vi{k}]")
         vlabel = f"[vi{k}]"
@@ -1153,7 +1193,10 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
             for t in texts:
                 cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(t["path"])]
             for im in imgs:
-                cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(im["path"])]
+                if im.get("vid"):   # video overlay: loop වෙලා item එකේ දිග දක්වා
+                    cmd += ["-stream_loop", "-1", "-t", f"{im['end'] - im['start']:.3f}", "-i", str(im["path"])]
+                else:
+                    cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(im["path"])]
             for ep_ in extra:
                 cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(ep_)]
             cmd += ["-filter_complex", graph, "-map", vlabel]
