@@ -10,7 +10,7 @@
 <header>
   <b>AegisX Editor</b>
   <button id="homebtn" title="Projects වෙත ආපසු">🏠 Projects</button>
-  <label class="btn">+ New project<input id="file" type="file" accept="video/*" hidden></label>
+  <label class="btn">+ New project<input id="file" type="file" accept="video/*,image/*" hidden></label>
   <span id="status"></span>
   <button id="layout" title="Preview එක තියෙන තැන">◨ Preview right</button>
   <div id="xwrap">
@@ -92,6 +92,7 @@
   <div class="ig col" id="i-clip" hidden>
     <div class="ig">
       <b>Clip</b>
+      <label title="Clip එකේ දිග (තත්පර) — image එකක් නම් 300s (5min) දක්වා දිග කරන්න පුළුවන්">Duration <input id="cdur" type="number" min="0.2" step="0.1" style="width:64px"> s</label>
       <label>Speed <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1"> <span id="speedv" class="v">1x</span></label>
       <span><button data-sp="1">1x</button> <button data-sp="2">2x</button> <button data-sp="4">4x</button> <button data-sp="8">8x</button></span>
       <label>Zoom <input id="czoom" type="range" min="1" max="3" step="0.05" value="1"> <span id="czoomv" class="v">1.00x</span></label>

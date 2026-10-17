@@ -169,3 +169,5 @@ button.tog.on{background:#3b6fd8}
 .imi::before,.imi::after{content:"";position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;background:#fff3}
 .imi::before{left:0}.imi::after{right:0}
 .asset .ath{width:28px;height:28px;object-fit:contain;border-radius:4px;background:#fff;background-image:linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%),linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%);background-size:8px 8px;background-position:0 0,4px 4px;flex:none}
+
+.clip::after{content:"";position:absolute;top:0;bottom:0;right:0;width:8px;cursor:ew-resize;background:#fff4}

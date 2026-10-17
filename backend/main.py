@@ -100,18 +100,51 @@ def make_thumb(d: Path):
 
 
 # ---------- projects ----------
+PROJ_IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif", ".heic"}
+IMG_PROJECT_MAX = 300   # image project එකක source length (තත්පර) - timeline එකේ මෙතනට වඩා දිග කරන්න බෑ (5 min)
+IMG_PROJECT_DEFAULT = 5  # මුලින් timeline එකේ පේන දිග (තත්පර) - trim handle එකෙන් දිග කරන්න පුළුවන්
+
+
+def image_to_video(img: Path, out: Path) -> bool:
+    """image එකක් -> දිග still video එකක් (clip එක timeline එකේ දිග කරන්න පුළුවන් වෙන්න)"""
+    with ffmpeg_lock:
+        try:
+            r = subprocess.run(
+                [FFMPEG, "-y", "-loop", "1", "-framerate", "5", "-i", str(img),
+                 "-t", str(IMG_PROJECT_MAX),
+                 "-vf", "scale='min(1920,iw)':'min(1920,ih)':force_original_aspect_ratio=decrease,"
+                        "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "20",
+                 "-g", "50", "-an", "-movflags", "+faststart", str(out)],
+                capture_output=True)
+            return r.returncode == 0 and out.exists() and out.stat().st_size > 0
+        except OSError as e:
+            print("ffmpeg error:", e)
+            return False
+
+
 @app.post("/api/projects")
 async def create(bg: BackgroundTasks, file: UploadFile = File(...)):
     pid = uuid.uuid4().hex[:10]
     d = DATA / pid
     d.mkdir(parents=True)
     ext = Path(file.filename or "v.mp4").suffix.lower() or ".mp4"
-    src = d / f"original{ext}"
+    is_img = ext in PROJ_IMG_EXT or (file.content_type or "").startswith("image/")
+    src = d / (f"upload_img{ext if ext in PROJ_IMG_EXT else '.png'}" if is_img else f"original{ext}")
     with src.open("wb") as f:
         while chunk := await file.read(1 << 20):
             f.write(chunk)
+    extra = {}
+    if is_img:
+        vid = d / "original.mp4"
+        if not image_to_video(src, vid):
+            shutil.rmtree(d, ignore_errors=True)
+            raise HTTPException(400, "මේ image එක read කරන්න බෑ (png/jpg/webp try කරන්න)")
+        src.unlink(missing_ok=True)
+        src = vid
+        extra = {"is_image": True, "default_len": IMG_PROJECT_DEFAULT}
     m = {"id": pid, "name": file.filename, "original": src.name,
-         "status": "processing", "created_at": time.time(), **probe(src)}
+         "status": "processing", "created_at": time.time(), **probe(src), **extra}
     write_meta(d, m)
     bg.add_task(make_proxy, pid)
     return m
@@ -145,7 +178,7 @@ def list_projects():
             clips = ed.get("clips") or []
             out.append({"id": m["id"], "name": m.get("name") or m["id"], "status": m.get("status"),
                         "duration": m.get("duration", 0), "width": m.get("width"), "height": m.get("height"),
-                        "clips": len(clips), "edited_duration": edited_len(clips) if clips else m.get("duration", 0),
+                        "clips": len(clips), "edited_duration": edited_len(clips) if clips else m.get("default_len") or m.get("duration", 0),
                         "sfx": len(ed.get("sfx") or []), "music": bool(ed.get("music")),
                         "created": created, "updated": updated,
                         "exported": (d / "output.mp4").exists(),

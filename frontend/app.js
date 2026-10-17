@@ -204,6 +204,7 @@ function syncInsp() {
   $('#i-clip').hidden = !c; $('#i-sfx').hidden = !s; $('#i-music').hidden = !m;
   if (c) {
     $('#speed').value = sp(c); $('#speedv').textContent = sp(c) + 'x';
+    if (document.activeElement !== $('#cdur')) $('#cdur').value = len(c).toFixed(2);
     $('#czoom').value = c.zoom; $('#czoomv').textContent = (+c.zoom).toFixed(2) + 'x';
     $('#zx').value = c.zx; $('#zy').value = c.zy;
     $('#croprm').hidden = !c.crop;
@@ -443,6 +444,27 @@ track.addEventListener('pointermove', e => track.classList.toggle('nearhead', ne
 track.addEventListener('pointerdown', e => {
   const el = e.target.closest('.clip'); if (!el || e.button) return;
   const idx = [...track.querySelectorAll('.clip')].indexOf(el);
+  // clip එකේ දකුණු කොන ඇදලා දිග අඩු/වැඩි කරන්න (image project එකක නම් මුළු දිග 600s දක්වා)
+  const rc0 = el.getBoundingClientRect();
+  if (e.clientX > rc0.right - 10 && clips[idx]) {
+    const c = clips[idx], e0 = c.end, x1 = e.clientX, maxEnd = meta?.duration || e0;
+    let did = false;
+    el.setPointerCapture?.(e.pointerId);
+    const mv2 = ev => {
+      if (!did && Math.abs(ev.clientX - x1) < 3) return;
+      if (!did) { snap('Clip duration'); did = true; if (playing) pause(); }
+      const ne = e0 + ((ev.clientX - x1) / pps) * sp(c);
+      c.end = +Math.min(maxEnd, Math.max(c.start + 0.2 * sp(c), ne)).toFixed(2);
+      el.style.width = len(c) * pps + 'px';
+    };
+    const up2 = () => {
+      el.removeEventListener('pointermove', mv2); el.removeEventListener('pointerup', up2); el.removeEventListener('pointercancel', up2);
+      swallow = true; setTimeout(() => swallow = false, 300);
+      if (did) { sel = idx; changed(); } else { render(); }
+    };
+    el.addEventListener('pointermove', mv2); el.addEventListener('pointerup', up2); el.addEventListener('pointercancel', up2);
+    e.preventDefault(); return;
+  }
   const x0 = e.clientX, base = offsets()[idx], dl = $('#dropline');
   let moved = false, to = idx;
   el.setPointerCapture?.(e.pointerId);
@@ -632,6 +654,13 @@ function bind(id, obj, key, label) {
   el.onchange = () => { gesture = false; el.blur(); };
 }
 const curSfx = () => sfx.find(x => x.id === selSfx);
+$('#cdur').onchange = e => {   // clip duration (තත්පර) type කරලා දෙන්න
+  const c = clips[sel]; if (!c) return;
+  snap('Clip duration');
+  const want = Math.max(0.2, +e.target.value || 1);
+  c.end = +Math.min(meta?.duration || (c.start + want * sp(c)), c.start + want * sp(c)).toFixed(2);
+  changed();
+};
 bind('#speed', () => clips[sel], 'speed', 'Clip speed'); bind('#czoom', () => clips[sel], 'zoom', 'Clip zoom');
 bind('#zx', () => clips[sel], 'zx', 'Zoom X'); bind('#zy', () => clips[sel], 'zy', 'Zoom Y');
 bind('#trdur', () => clips[sel]?.tr, 'dur', 'Transition duration'); bind('#trvol', () => clips[sel]?.tr, 'sv', 'Transition volume');
@@ -813,7 +842,7 @@ async function openProject(id) {
   try { ui = await (await fetch(`/api/projects/${id}/ui`)).json(); } catch {}
   if (tok !== openTok) return;
   meta = m; setStatus(m.name);
-  clips = (ed.clips?.length ? ed.clips : [{ start: 0, end: m.duration }]).map(norm);
+  clips = (ed.clips?.length ? ed.clips : [{ start: 0, end: m.default_len || m.duration }]).map(norm);
   sfx = ed.sfx || []; music = ed.music || null; canvas = ed.canvas || 'auto';
   texts = (ed.texts || []).map(normT);
   fxs = (ed.fxs || []).map(normF);
