@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
 <header>
@@ -20,6 +20,7 @@
       <option value="9:16">Canvas: 9:16</option><option value="16:9">Canvas: 16:9</option><option value="1:1">Canvas: 1:1</option>
       <option value="4:5">Canvas: 4:5</option><option value="3:4">Canvas: 3:4</option><option value="4:3">Canvas: 4:3</option>
     </select>
+    <label class="cbgl" title="Canvas background color (shows around / behind the video when it does not fill the canvas)">BG <input id="cbg" type="color" value="#000000"></label>
     <select id="xres" title="Output size">
       <option value="hd">Size: Auto HD (≥1080)</option><option value="0">Size: Original</option><option value="1080">Size: 1080 wide</option><option value="1440">Size: 1440 wide</option><option value="2160">Size: 2160 wide (4K)</option><option value="720">Size: 720 wide</option>
     </select>
@@ -93,8 +94,8 @@
       <b class="hd" data-h="tl"></b><b class="hd" data-h="t"></b><b class="hd" data-h="tr"></b><b class="hd" data-h="r"></b>
       <b class="hd" data-h="br"></b><b class="hd" data-h="b"></b><b class="hd" data-h="bl"></b><b class="hd" data-h="l"></b>
     </div></div>
-    <div id="idleh" hidden><b class="hd ih" data-h="tl"></b><b class="hd ih" data-h="t"></b><b class="hd ih" data-h="tr"></b><b class="hd ih" data-h="r"></b>
-      <b class="hd ih" data-h="br"></b><b class="hd ih" data-h="b"></b><b class="hd ih" data-h="bl"></b><b class="hd ih" data-h="l"></b></div>
+    <div id="idleh" hidden><div id="vbox" hidden><b class="hd ih" data-h="tl"></b><b class="hd ih" data-h="t"></b><b class="hd ih" data-h="tr"></b><b class="hd ih" data-h="r"></b>
+      <b class="hd ih" data-h="br"></b><b class="hd ih" data-h="b"></b><b class="hd ih" data-h="bl"></b><b class="hd ih" data-h="l"></b></div></div>
   </div></section>
 
   <!-- ===== right: inspector ===== -->
@@ -136,6 +137,13 @@
             <label>X <input id="zx" type="range" min="0" max="1" step="0.01" value="0.5"></label>
             <label>Y <input id="zy" type="range" min="0" max="1" step="0.01" value="0.5"></label>
             <button id="zreset">Reset zoom</button>
+          </div>
+          <div class="ig">
+            <b>Position &amp; size</b>
+            <p class="hint">Drag the video in the preview to move it anywhere on the canvas, drag a <b>corner</b> to resize, drag a <b>side handle</b> to crop.</p>
+            <label>Size <input id="psize" type="range" min="5" max="300" step="1" value="100"> <span id="psizev" class="v">100%</span></label>
+            <span class="btnrow"><button id="pfit" title="Fit inside the canvas (default)">Fit</button> <button id="pfill" title="Cover the whole canvas">Fill</button> <button id="pcenter" title="Center on the canvas">Center</button></span>
+            <span class="btnrow" id="bgsw"><button data-c="#000000" title="Black">⬛</button> <button data-c="#ffffff" title="White">⬜</button> <button data-c="#1e1e2e" title="Dark">🌑</button></span>
           </div>
           <div class="ig">
             <b>Crop &amp; shape</b>
@@ -313,6 +321,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

@@ -6,8 +6,9 @@ let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, sel
 let undo = [], redo = [], saveT = null, gesture = false, zkey = '', swallow = false;
 let linked = true, mute = false;   // linked = main item delete කරන්න බෑ · mute = main video sound off
 let dirty = false, uiT = null, openTok = 0;   // dirty = save කරන්න තියෙන edit; openTok = project switch token
-const DEF = { smooth: false, speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, rad: 0 };   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
+const DEF = { smooth: false, speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, pos: null, rad: 0 };   // pos = {x,y,w}: video placement on the canvas (center x/y 0..1, w = width / canvas width); null = auto fit   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
 let canvas = 'auto';   // output ratio: auto | orig | 'a:b'
+let canvasBg = '#000000';   // canvas background color (empty areas around / behind the main video)
 let cropMode = false, cropIdx = -1, cb = null, cratio = null;   // crop editor state
 const TRDEF = { type: 'none', dur: 0.4, snd: null, sv: 1 };
 const norm = c => ({ ...DEF, ...c, tr: { ...TRDEF, ...(c.tr || {}) } });
@@ -173,23 +174,41 @@ function effRect(c) {
   return { x: cr.x + (cr.w - w) * (c.zx ?? 0.5), y: cr.y + (cr.h - h) * (c.zy ?? 0.5), w, h };
 }
 
+// where the clip's visible region (crop+zoom) sits on the stage, in px: center + size. pos = user placed, else contain-fit
+function placeOf(c, W, H) {
+  const r = effRect(c), ar = r.w / r.h * srcA();
+  if (c.pos) { const w = c.pos.w * W; return { cx: c.pos.x * W, cy: c.pos.y * H, w, h: w / ar }; }
+  const w = Math.min(W, H * ar); return { cx: W / 2, cy: H / 2, w, h: w / ar };
+}
+const vbox = $('#vbox');
+function placeVbox(c) {   // selection box (move / resize / crop handles) over the visible part of the video
+  const W = stage.clientWidth, H = stage.clientHeight;
+  if (cropMode || sel < 0 || sel !== cur || !c || !W || !H) { vbox.hidden = true; return; }
+  const p = placeOf(c, W, H), x0 = Math.max(0, p.cx - p.w / 2), x1 = Math.min(W, p.cx + p.w / 2), y0 = Math.max(0, p.cy - p.h / 2), y1 = Math.min(H, p.cy + p.h / 2);
+  vbox.hidden = x1 - x0 < 4 || y1 - y0 < 4;
+  Object.assign(vbox.style, { left: x0 + 'px', top: y0 + 'px', width: (x1 - x0) + 'px', height: (y1 - y0) + 'px' });
+}
 function applyZoom(c) {
   const r = cropMode ? FULL : effRect(c), W = stage.clientWidth, H = stage.clientHeight, sa = srcA(), rad = cropMode ? 0 : +c.rad || 0;
-  const k = [r.x, r.y, r.w, r.h, W, H, sa, !cropMode && c.crop ? 1 : 0, rad].join('|');
+  const pos = !cropMode && c.pos ? c.pos : null;
+  const k = [r.x, r.y, r.w, r.h, W, H, sa, !cropMode && c.crop ? 1 : 0, rad, pos ? pos.x + ',' + pos.y + ',' + pos.w : '', sel, cur, cropMode ? 1 : 0].join('|');
   if (k === zkey) return;
   zkey = k;
   if (!W || !H) return;
   // video element = source frame, canvas එක ඇතුළේ contain (Vw×Vh)
   const Vw = Math.min(W, H * sa), Vh = Vw / sa;
   video.style.width = Vw + 'px'; video.style.height = Vh + 'px';
-  // region එක (crop+zoom) canvas එකට contain-fit → backend එකේ scale+pad එකම
-  const s = Math.min(W / (r.w * Vw), H / (r.h * Vh)), cx = (r.x + r.w / 2) * Vw, cy = (r.y + r.h / 2) * Vh;
-  zmst = { s, cx, cy, Vw, Vh, r, W, H };
+  // region = crop+zoom. pos නැත්නම් canvas එකට contain-fit (backend scale+pad), pos තිබ්බොත් user දාපු තැනට / size එකට
+  const s = pos ? pos.w * W / (r.w * Vw) : Math.min(W / (r.w * Vw), H / (r.h * Vh));
+  const tx = pos ? pos.x * W : W / 2, ty = pos ? pos.y * H : H / 2;
+  const cx = (r.x + r.w / 2) * Vw, cy = (r.y + r.h / 2) * Vh;
+  zmst = { s, cx, cy, Vw, Vh, r, W, H, tx, ty };
   video.style.transformOrigin = '0 0';
-  video.style.transform = `translate(${W / 2}px,${H / 2}px) scale(${s}) translate(${-cx}px,${-cy}px)`;
+  video.style.transform = `translate(${tx}px,${ty}px) scale(${s}) translate(${-cx}px,${-cy}px)`;
   const R = rad * Math.min(r.w * Vw, r.h * Vh);   // corner radius (video element local px; transform scale එකෙන් screen size එකට සමානයි)
   video.style.clipPath = r.w > 0.999 && r.h > 0.999 && R < 0.5 ? 'none'
     : `inset(${r.y * 100}% ${Math.max(0, 1 - r.x - r.w) * 100}% ${Math.max(0, 1 - r.y - r.h) * 100}% ${r.x * 100}%${R >= 0.5 ? ` round ${R.toFixed(2)}px` : ''})`;
+  placeVbox(c);
 }
 
 function tick() {
@@ -236,6 +255,7 @@ function syncInsp() {
     $('#zx').value = c.zx; $('#zy').value = c.zy;
     const cr = Math.round((c.rad || 0) * 100); $('#crad').value = cr; $('#cradv').textContent = cr + '%';
     $('#croprm').hidden = !c.crop;
+    syncPlace(c);
     const first = sel === 0, tr = c.tr || TRDEF;
     $('#trtype').value = tr.type;
     $('#trdur').value = tr.dur; $('#trdurv').textContent = (+tr.dur).toFixed(2) + 's';
@@ -259,7 +279,7 @@ function syncInsp() {
 }
 
 function render() {
-  updateStage(); $('#canvas').value = canvas;
+  updateStage(); $('#canvas').value = canvas; stage.style.background = canvasBg; $('#cbg').value = canvasBg;
   track.querySelectorAll('.clip,.sfx,.music,.tmark,.txi,.fxi,.imi,.mainph').forEach(e => e.remove());
   video.style.visibility = clips.length ? '' : 'hidden'; video.muted = mute; syncMainBtns();
   const off = offsets(), T = total();
@@ -324,8 +344,8 @@ function render() {
 }
 
 // ================= state / undo / save =================
-const state = () => JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs, linked, mute });
-function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; linked = o.linked !== false; mute = !!o.mute; }
+const state = () => JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, linked, mute });
+function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; canvasBg = o.bg || '#000000'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; linked = o.linked !== false; mute = !!o.mute; }
 function snap(label = 'Edit') { undo.push({ s: state(), label }); redo = []; if (undo.length > 100) undo.shift(); updUndoUi(); }
 let toastT = null;
 function toast(msg) {
@@ -345,7 +365,7 @@ function save() {   // edit (clips/sfx/music/canvas) -> edit.json. keepalive: ta
   if (!pid || !dirty) return;
   dirty = false;
   fetch(`/api/projects/${pid}/edit`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, keepalive: true,
-    body: JSON.stringify({ clips, sfx, music, canvas, texts, fxs, imgs, linked, mute, noMain: !clips.length }) });
+    body: JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, linked, mute, noMain: !clips.length }) });
 }
 function saveUi() {   // playhead / timeline zoom / export settings -> ui.json ("last edited" වෙලාව වෙනස් කරන්නේ නෑ)
   clearTimeout(uiT);
@@ -657,13 +677,61 @@ cbox.addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation();
   startCropDrag(e, e.target.dataset.h || 'move');
 });
-// clip select කළාම preview box එකේ කොන්/මැද handles වලින් කෙලින්ම ඇදලා free crop
+// clip select කළාම: video box එකේ කොන් = resize (corner drag) · මැද handles = free crop · box එක ඇතුළෙන් ඇදලා move
 $('#idleh').addEventListener('pointerdown', e => {
   const hd = e.target.closest('.ih');
   if (!hd || e.button || sel < 0) return;
   e.preventDefault(); e.stopPropagation();
+  const h = hd.dataset.h;
+  if (h.length === 2) { startPlaceResize(e, h, hd); return; }   // tl tr bl br
   enterCrop(); if (!cropMode) return;
-  startCropDrag(e, hd.dataset.h);
+  startCropDrag(e, h);
+});
+function setPos(c, W, H, p) {   // stage px -> normalized pos
+  c.pos = { x: +(p.cx / W).toFixed(4), y: +(p.cy / H).toFixed(4), w: +(p.w / W).toFixed(4) };
+}
+function startPlaceResize(e, h, hd) {
+  const c = clips[sel]; if (!c) return;
+  const R = stage.getBoundingClientRect(), W = R.width, H = R.height, p = placeOf(c, W, H);
+  const sx = h.includes('l') ? -1 : 1, sy = h.includes('t') ? -1 : 1;
+  const fx = p.cx - sx * p.w / 2, fy = p.cy - sy * p.h / 2, vx = sx * p.w, vy = sy * p.h;   // fixed (opposite) corner + diagonal
+  const proj = ev => (ev.clientX - R.left - fx) * vx + (ev.clientY - R.top - fy) * vy;
+  const d0 = proj(e) || 1, ar = p.w / p.h;
+  let moved = false;
+  hd.setPointerCapture?.(e.pointerId);
+  const mv = ev => {
+    if (!moved) { if (Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 3) return; snap('Resize video'); moved = true; if (playing) pause(); }
+    const w = clampN(p.w * proj(ev) / d0, 0.03 * W, 8 * W), hh = w / ar;
+    setPos(c, W, H, { cx: fx + sx * w / 2, cy: fy + sy * hh / 2, w });
+    zkey = ''; applyZoom(c); syncPlace(c); touch();
+  };
+  const up = () => { hd.removeEventListener('pointermove', mv); hd.removeEventListener('pointerup', up); hd.removeEventListener('pointercancel', up); if (moved) changed(); };
+  hd.addEventListener('pointermove', mv); hd.addEventListener('pointerup', up); hd.addEventListener('pointercancel', up);
+}
+// video එක preview එකේ ඇදලා move (magnetic: canvas center / edges / grid)
+stage.addEventListener('pointerdown', e => {
+  if (cropMode || e.button || !clips.length || e.target.closest('.tx, .im, .hd, #cropov')) return;
+  if (sel !== cur || sel < 0) { const i = tlToClip(head).i; clearSel(); sel = i; render(); }
+  const c = clips[sel]; if (!c) return;
+  e.preventDefault();
+  const R = stage.getBoundingClientRect(), W = R.width, H = R.height, p = placeOf(c, W, H);
+  let moved = false;
+  stage.setPointerCapture?.(e.pointerId);
+  const mv = ev => {
+    const dx = ev.clientX - e.clientX, dy = ev.clientY - e.clientY;
+    if (!moved) { if (Math.abs(dx) + Math.abs(dy) < 3) return; snap('Move video'); moved = true; if (playing) pause(); }
+    let nx = clampN((p.cx + dx) / W, 0, 1), ny = clampN((p.cy + dy) / H, 0, 1), gv = null, gh = null;
+    if (snapOn && !ev.altKey) {
+      const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
+      if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+      const a = snap1(nx, p.w / W / 2, vl, 7 / W), b = snap1(ny, p.h / H / 2, hl, 7 / H);
+      nx = a.c; ny = b.c; gv = a.line; gh = b.line;
+    }
+    setPos(c, W, H, { cx: nx * W, cy: ny * H, w: p.w }); guides(gv, gh);
+    zkey = ''; applyZoom(c); syncPlace(c); touch();
+  };
+  const up = () => { stage.removeEventListener('pointermove', mv); stage.removeEventListener('pointerup', up); stage.removeEventListener('pointercancel', up); guides(null, null); if (moved) changed(); };
+  stage.addEventListener('pointermove', mv); stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
 });
 function scaleBox(f) {                 // zoom: box එක ratio රඳවගෙන ලොකු/පොඩි කරනවා
   const a = cb.w / cb.h, cx = cb.x + cb.w / 2, cy = cb.y + cb.h / 2;
@@ -684,6 +752,36 @@ $('#capply').onclick = applyCrop;
 $('#ccancel').onclick = exitCrop;
 $('#cropbtn').onclick = e => { enterCrop(); e.target.blur(); };
 $('#croprm').onclick = () => { if (sel < 0) return; snap('Remove crop'); clips[sel].crop = null; changed(); };
+
+// ================= video placement (move / resize on canvas) + canvas background =================
+function syncPlace(c) {
+  const W = stage.clientWidth, H = stage.clientHeight; if (!c || !W) return;
+  const p = placeOf(c, W, H), sz = Math.round(p.w / W * 100);
+  if (document.activeElement !== $('#psize')) $('#psize').value = clampN(sz, 5, 300);
+  $('#psizev').textContent = sz + '%';
+  $('#pfit').classList.toggle('on', !c.pos);
+}
+$('#psize').oninput = e => {
+  const c = clips[sel]; if (!c) return;
+  if (!gesture) { snap('Video size'); gesture = true; }
+  const W = stage.clientWidth, H = stage.clientHeight, p = placeOf(c, W, H), w = +e.target.value / 100 * W;
+  setPos(c, W, H, { cx: p.cx, cy: p.cy, w }); changed();
+};
+$('#psize').onchange = e => { gesture = false; e.target.blur(); };
+$('#pfit').onclick = e => { const c = clips[sel]; if (!c) return; snap('Fit video'); c.pos = null; changed(); e.target.blur(); };
+$('#pfill').onclick = e => {
+  const c = clips[sel]; if (!c) return; snap('Fill canvas');
+  const W = stage.clientWidth, H = stage.clientHeight, r = effRect(c), ar = r.w / r.h * srcA();
+  setPos(c, W, H, { cx: W / 2, cy: H / 2, w: Math.max(W, H * ar) }); changed(); e.target.blur();
+};
+$('#pcenter').onclick = e => {
+  const c = clips[sel]; if (!c) return; snap('Center video');
+  const W = stage.clientWidth, H = stage.clientHeight, p = placeOf(c, W, H);
+  setPos(c, W, H, { cx: W / 2, cy: H / 2, w: p.w }); changed(); e.target.blur();
+};
+$('#cbg').oninput = e => { if (!gesture) { snap('Canvas background'); gesture = true; } canvasBg = e.target.value; stage.style.background = canvasBg; touch(); };
+$('#cbg').onchange = e => { gesture = false; changed(); e.target.blur(); };
+document.querySelectorAll('#bgsw button').forEach(b => b.onclick = () => { snap('Canvas background'); canvasBg = b.dataset.c; changed(); });
 
 // ================= inspector =================
 function bind(id, obj, key, label) {
@@ -903,7 +1001,7 @@ $('#export').onclick = async () => {
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
-  const body = { clips, sfx, music, canvas, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs, mute, linked };
+  const body = { clips, sfx, music, canvas, bg: canvasBg, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs, mute, linked };
   const r = await fetch(`/api/projects/${pid}/export`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { $('#xstat').textContent = 'Export error: ' + (await r.text()).slice(0, 120); return; }
@@ -973,7 +1071,7 @@ async function openProject(id) {
   meta = m; setStatus(m.name);
   clips = (ed.clips?.length ? ed.clips : ed.noMain ? [] : [{ start: 0, end: m.default_len || m.duration }]).map(norm);
   linked = ed.linked !== false; mute = !!ed.mute;
-  sfx = ed.sfx || []; music = ed.music || null; canvas = ed.canvas || 'auto';
+  sfx = ed.sfx || []; music = ed.music || null; canvas = ed.canvas || 'auto'; canvasBg = ed.bg || '#000000';
   texts = (ed.texts || []).map(normT);
   fxs = (ed.fxs || []).map(normF);
   imgs = (ed.imgs || []).map(normI);
@@ -1767,8 +1865,8 @@ function drawGlitch(cv, a, k, W, H) {   // RGB split + horizontal slice shift (v
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   if (glTmp.width !== W || glTmp.height !== H) { glTmp.width = W; glTmp.height = H; }
   const g = cv.getContext('2d'), tg = glTmp.getContext('2d');
-  const rx = (z.r.x * z.Vw - z.cx) * z.s + z.W / 2, ry = (z.r.y * z.Vh - z.cy) * z.s + z.H / 2, rw = z.r.w * z.Vw * z.s, rh = z.r.h * z.Vh * z.s;
-  const draw = (c, dx) => { c.save(); c.translate(dx, 0); c.translate(z.W / 2, z.H / 2); c.scale(z.s, z.s); c.translate(-z.cx, -z.cy); c.drawImage(video, 0, 0, z.Vw, z.Vh); c.restore(); };
+  const rx = (z.r.x * z.Vw - z.cx) * z.s + z.tx, ry = (z.r.y * z.Vh - z.cy) * z.s + z.ty, rw = z.r.w * z.Vw * z.s, rh = z.r.h * z.Vh * z.s;
+  const draw = (c, dx) => { c.save(); c.translate(dx, 0); c.translate(z.tx, z.ty); c.scale(z.s, z.s); c.translate(-z.cx, -z.cy); c.drawImage(video, 0, 0, z.Vw, z.Vh); c.restore(); };
   const rpx = Math.max(1, Math.round((3 + 14 * a) * W / 1080));
   g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H);
   g.save(); g.beginPath(); g.rect(rx, ry, rw, rh); g.clip();

@@ -720,6 +720,18 @@ def clean_canvas(k):
     return "auto"
 
 
+def clean_pos(p):
+    """main video placement on the canvas: center x/y (0..1 of canvas) + width (fraction of canvas width). None = auto fit"""
+    if not isinstance(p, dict):
+        return None
+    return {"x": clamp(p.get("x"), 0, 1, 0.5), "y": clamp(p.get("y"), 0, 1, 0.5), "w": clamp(p.get("w"), 0.03, 8, 1)}
+
+
+def clean_bg(c):
+    """canvas background color '#rrggbb' (default black)"""
+    return c if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c) else "#000000"
+
+
 def canvas_dims(canvas, clips, sw, sh):
     if canvas == "auto":
         cr = clips[0].get("crop")
@@ -768,6 +780,7 @@ def sanitize(raw, dur):
                     "zx": clamp(c.get("zx"), 0, 1, 0.5),
                     "zy": clamp(c.get("zy"), 0, 1, 0.5),
                     "crop": clean_crop(c.get("crop")),
+                    "pos": clean_pos(c.get("pos")),   # move / resize on canvas (None = fit)
                     "rad": clamp(c.get("rad"), 0, 0.5, 0),   # corner radius (video region එකේ කොටට පොඩි පැත්තේ fraction)
                     "tr": clean_tr(c.get("tr"))})
     return out
@@ -969,9 +982,32 @@ def region_px(c, ow, oh, sw, sh):
     cr = c.get("crop")
     fw, fh = (cr["w"], cr["h"]) if cr else (1.0, 1.0)
     fr = (fw * sw) / (fh * sh)
+    if c.get("pos"):
+        rw = max(2, round(c["pos"]["w"] * ow))
+        return rw, max(2, round(rw / fr))
     if abs(fr / (ow / oh) - 1) > 0.005:
         return (ow, ow / fr) if fr > ow / oh else (oh * fr, oh)
     return ow, oh
+
+
+def place_px(c, ow, oh, sw, sh):
+    """placed video region -> (rw, rh, vis_crop|None, pad_x, pad_y). rw/rh = scaled region size (even);
+    the part outside the canvas is cropped away, then padded back with the bg color."""
+    cr = c.get("crop")
+    fw, fh = (cr["w"], cr["h"]) if cr else (1.0, 1.0)
+    fr = (fw * sw) / (fh * sh)
+    rw = max(2, round(c["pos"]["w"] * ow)); rw -= rw % 2
+    rh = max(2, round(rw / fr)); rh -= rh % 2
+    px = round(c["pos"]["x"] * ow - rw / 2)
+    py = round(c["pos"]["y"] * oh - rh / 2)
+    px = max(-rw + 2, min(ow - 2, px)); py = max(-rh + 2, min(oh - 2, py))   # always keep >=2px visible
+    px -= px % 2; py -= py % 2   # even offsets (yuv420 chroma); rw/rh/ow/oh are even too -> every size below stays even
+    vx0, vy0 = max(0, px), max(0, py)
+    vx1, vy1 = min(ow, px + rw), min(oh, py + rh)
+    vw, vh = max(2, vx1 - vx0), max(2, vy1 - vy0)
+    cx, cy = vx0 - px, vy0 - py
+    vis = None if (cx == 0 and cy == 0 and vw == rw and vh == rh) else (vw, vh, cx, cy)
+    return rw, rh, vis, vx0, vy0
 
 
 def ov_x(o):
@@ -1001,8 +1037,9 @@ def atempo(s: float) -> str:
     return ",".join(f"atempo={p:.4f}" for p in parts)
 
 
-def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0, corners=None):
+def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0, corners=None, bg="#000000"):
     chains, tags, n = [], "", len(clips)
+    bgc = "0x" + bg.lstrip("#")
     T = "(on/30)"
     for i, c in enumerate(clips):
         L = clip_len(c)
@@ -1018,10 +1055,15 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
                   f"(iw-ow)*{c['zx']:.4f}:(ih-oh)*{c['zy']:.4f}")
         fw, fh = (cr["w"], cr["h"]) if cr else (1.0, 1.0)
         frame_r = (fw * (sw or ow)) / (fh * (sh or oh))   # crop+zoom පස්සේ frame ratio (zoom එකෙන් වෙනස් වෙන්නේ නෑ)
-        if abs(frame_r / (ow / oh) - 1) > 0.005:
-            # frame ratio එක canvas ratio එකට වෙනස් -> canvas එකට fit කරලා කළු bars (CapCut වගේ)
+        if c.get("pos"):
+            # user placed / resized the video on the canvas: scale, cut off what is outside the canvas, pad with the bg color
+            rw, rh, vis, padx, pady = place_px(c, ow, oh, sw or ow, sh or oh)
+            v += f",scale={rw}:{rh}:flags=lanczos"
+            post = (f",crop={vis[0]}:{vis[1]}:{vis[2]}:{vis[3]}" if vis else "") + f",pad={ow}:{oh}:{padx}:{pady}:{bgc},fps=30"
+        elif abs(frame_r / (ow / oh) - 1) > 0.005:
+            # frame ratio එක canvas ratio එකට වෙනස් -> canvas එකට fit කරලා bg color bars
             v += f",scale={ow}:{oh}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
-            post = f",pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black,fps=30"
+            post = f",pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:{bgc},fps=30"
         else:
             v += f",scale={ow}:{oh}:flags=lanczos"
             post = ",fps=30"
@@ -1131,7 +1173,7 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     return ";".join(chains), label, vlabel
 
 
-def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None, mute: bool = False):
+def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None, mute: bool = False, bgcol: str = "#000000"):
     d = DATA / pid
     job = JOBS[pid]
     with ffmpeg_lock:
@@ -1183,7 +1225,7 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                     im["mi"], im["ph"] = nxt + len(extra), h
                     extra.append(mp)
             has_audio = bool(info["has_audio"]) and not mute   # mute = main video එකේ sound එක අයින් (SFX / music ඉතිරියි)
-            graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners)
+            graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners, bgcol)
             tmp = d / "output_tmp.mp4"
             cmd = [FFMPEG, "-y", "-i", str(src)]
             for x in sfx:
@@ -1245,7 +1287,8 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
     except ValueError:
         ed = {}
     mute = bool(body.get("mute"))
-    ed.update({"clips": clips, "sfx": sfx, "music": music, "canvas": canvas, "mute": mute})
+    bgcol = clean_bg(body.get("bg"))
+    ed.update({"clips": clips, "sfx": sfx, "music": music, "canvas": canvas, "mute": mute, "bg": bgcol})
     if "linked" in body:
         ed["linked"] = bool(body.get("linked"))
     layers = body.get("layers")
@@ -1265,7 +1308,7 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
     width = width if 240 <= width <= 4320 else 0
     preset = body.get("preset") if body.get("preset") in ("veryfast", "medium") else "veryfast"
     JOBS[pid] = {"status": "queued", "progress": 0, "error": ""}
-    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs, mute)
+    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs, mute, bgcol)
     return JOBS[pid]
 
 
