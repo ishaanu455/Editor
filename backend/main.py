@@ -1,4 +1,4 @@
-import base64, json, os, re, shutil, struct, subprocess, threading, time, uuid
+import base64, json, math, os, re, shutil, struct, subprocess, threading, time, uuid, zlib
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse
@@ -662,6 +662,7 @@ def sanitize(raw, dur):
                     "zx": clamp(c.get("zx"), 0, 1, 0.5),
                     "zy": clamp(c.get("zy"), 0, 1, 0.5),
                     "crop": clean_crop(c.get("crop")),
+                    "rad": clamp(c.get("rad"), 0, 0.5, 0),   # corner radius (video region එකේ කොටට පොඩි පැත්තේ fraction)
                     "tr": clean_tr(c.get("tr"))})
     return out
 
@@ -677,6 +678,15 @@ def sanitize_audio(sfx_raw, music_raw):
         music = {"asset": music_raw["asset"], "vol": clamp(music_raw.get("vol"), 0, 2, 0.3),
                  "fade": clamp(music_raw.get("fade"), 0, 10, 1.5)}
     return sfx, music
+
+
+def scr_dir(v):
+    """scroll direction: -1 = වමට, 1 = දකුණට, 0 = නැහැ"""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 0
+    return -1 if v < -0.5 else 1 if v > 0.5 else 0
 
 
 def sanitize_texts(raw, d: Path):
@@ -700,8 +710,9 @@ def sanitize_texts(raw, d: Path):
         s0 = clamp(t.get("start"), 0, 36000, 0)
         out.append({"path": path, "pw": struct.unpack(">I", data[16:20])[0] if len(data) > 24 else 0,
                     "wf": clamp(t.get("wf"), 0.001, 4, 0.3),
-                    "x": clamp(t.get("x"), 0, 1, 0.5), "y": clamp(t.get("y"), 0, 1, 0.5),
+                    "x": clamp(t.get("x"), -2, 3, 0.5), "y": clamp(t.get("y"), 0, 1, 0.5),
                     "op": clamp(t.get("op"), 0, 1, 1),
+                    "scr": scr_dir(t.get("scr")), "spd": clamp(t.get("spd"), 0.005, 3, 0.2),
                     "start": s0, "end": max(s0 + 0.05, clamp(t.get("end"), 0, 36000, s0 + 3))})
     return out
 
@@ -723,8 +734,10 @@ def sanitize_imgs(raw):
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.05, 36000, 3)
         out.append({"path": p, "w": clamp(x.get("w"), 0.01, 4, 0.4),
-                    "x": clamp(x.get("x"), 0, 1, 0.5), "y": clamp(x.get("y"), 0, 1, 0.5),
-                    "op": clamp(x.get("op"), 0, 1, 1), "start": s0, "end": s0 + d})
+                    "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), 0, 1, 0.5),
+                    "op": clamp(x.get("op"), 0, 1, 1), "rad": clamp(x.get("rad"), 0, 0.5, 0),
+                    "scr": scr_dir(x.get("scr")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
+                    "start": s0, "end": s0 + d})
     return out
 
 
@@ -739,7 +752,7 @@ def sanitize_fxs(raw):
             continue
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.1, 36000, 3)
-        out.append({"type": x["type"], "start": s0, "end": s0 + d, "amt": clamp(x.get("amt"), 0.05, 1, 0.6)})
+        out.append({"type": x["type"], "start": s0, "end": s0 + d, "amt": clamp(x.get("amt"), 0.01, 1.5, 0.6)})
     return out
 
 
@@ -752,11 +765,12 @@ def build_fx(vin, fxs, ow, oh, total):
     """concat කළ video ([v]) උඩට FX chain. returns (graph, final label)"""
     ch, cur = [], vin
     for i, f in enumerate(fxs):
-        a = f["amt"]
+        a = f["amt"]          # 0.01 .. 1.5
+        ao = min(1.0, a)      # blend opacity උපරිමය 1
         en = f"between(t,{f['start']:.3f},{f['end']:.3f})"
         out = f"[fx{i}]"
         if f["type"] == "grain":
-            c0, c1 = round(a * 55), round(a * 20)
+            c0, c1 = min(100, round(a * 55)), min(100, round(a * 20))
             ch.append(f"{cur}noise=c0s={c0}:c0f=t+u:c1s={c1}:c1f=t+u:c2s={c1}:c2f=t+u:enable='{en}'{out}")
         elif f["type"] == "vintage":
             ch.append(f"{cur}split[va{i}][vb{i}]")
@@ -765,7 +779,7 @@ def build_fx(vin, fxs, ow, oh, total):
                       f"curves=all='0/0.08 0.25/0.28 0.75/0.77 1/0.91',eq=contrast=1.08:saturation=0.9,"
                       f"gblur=sigma=0.7,vignette=angle=PI/3.5,format=yuv420p[vc{i}]")
             ch.append(f"[va{i}][vc{i}]blend=c0_mode=normal:c0_opacity=1:c1_mode=normal:c2_mode=normal:"
-                      f"all_opacity={a:.3f}:enable='{en}'{out}")
+                      f"all_opacity={ao:.3f}:enable='{en}'{out}")
         elif f["type"] == "dust":
             d = f"{total:.3f}"
             w4, h4 = max(2, ow // 4), max(2, oh // 4)
@@ -779,9 +793,9 @@ def build_fx(vin, fxs, ow, oh, total):
             ch.append(f"color=c=black:s={max(2, ow // 2)}x96:r=10:d={d},format=yuv420p,"
                       f"geq=lum='if(gt({h1},0.996),if(lt(abs(Y/H-{h2}),0.35),190,0),0)':cb=128:cr=128,"
                       f"scale={ow}:{oh}:flags=neighbor,fps=30,format=yuv420p[sc{i}]")
-            ch.append(f"{cur}[dw{i}]blend=c0_mode=screen:c0_opacity={a:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[da{i}]")
-            ch.append(f"[da{i}][dk{i}]blend=c0_mode=multiply:c0_opacity={a:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[db{i}]")
-            ch.append(f"[db{i}][sc{i}]blend=c0_mode=screen:c0_opacity={a:.3f}:c1_expr=A:c2_expr=A:enable='{en}'{out}")
+            ch.append(f"{cur}[dw{i}]blend=c0_mode=screen:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[da{i}]")
+            ch.append(f"[da{i}][dk{i}]blend=c0_mode=multiply:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'[db{i}]")
+            ch.append(f"[db{i}][sc{i}]blend=c0_mode=screen:c0_opacity={ao:.3f}:c1_expr=A:c2_expr=A:enable='{en}'{out}")
         else:   # glitch: random bursts (8Hz grid) -- RGB split + horizontal slice shift
             k = "floor(t*8)"
             en = f"between(t,{f['start']:.3f},{f['end']:.3f})*lt({hx(k + '*91.7')},{0.22 + 0.4 * a:.3f})"
@@ -799,6 +813,62 @@ def build_fx(vin, fxs, ow, oh, total):
     return ";".join(ch), cur
 
 
+# ---------- rounded corners: tiny PNG writers (Pillow ඕනේ නෑ) ----------
+def _png(path: Path, w: int, h: int, ctype: int, rows):
+    """minimal 8-bit PNG writer. ctype 0 = gray, 6 = RGBA. rows = scanline bytes (filter byte නැතුව)"""
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+    raw = b"".join(b"\x00" + bytes(r) for r in rows)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, ctype, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def _quarter(R: int):
+    """top-left R x R quarter: circle (centre R,R) ඇතුළත coverage 0..255 (anti-aliased)"""
+    rows = []
+    for y in range(R):
+        dy = R - y - 0.5
+        rows.append([int(max(0.0, min(1.0, R - math.hypot(R - x - 0.5, dy) + 0.5)) * 255 + 0.5) for x in range(R)])
+    return rows
+
+
+def corner_png(path: Path, R: int):
+    """video clip corners: R x R, කළු + (කොන පිට) alpha. 4 corner එකටම flip කරලා overlay කරනවා"""
+    _png(path, R, R, 6, (b"".join(bytes((0, 0, 0, 255 - v)) for v in row) for row in _quarter(R)))
+
+
+def mask_png(path: Path, w: int, h: int, R: int):
+    """image overlay: w x h gray mask (සුදු = පෙනෙන කොටස), rounded rect"""
+    R = max(1, min(R, w // 2, h // 2))
+    q = _quarter(R)
+    mid = bytes([255]) * (w - 2 * R)
+    def row(y):
+        yy = y if y < R else h - 1 - y if y >= h - R else None
+        if yy is None:
+            return bytes([255]) * w
+        return bytes(q[yy]) + mid + bytes(reversed(q[yy]))
+    _png(path, w, h, 0, (row(y) for y in range(h)))
+
+
+def region_px(c, ow, oh, sw, sh):
+    """crop+zoom කළ video frame එක canvas (ow x oh) එක ඇතුළේ fit වෙන size එක (rounded corners වලට)"""
+    cr = c.get("crop")
+    fw, fh = (cr["w"], cr["h"]) if cr else (1.0, 1.0)
+    fr = (fw * sw) / (fh * sh)
+    if abs(fr / (ow / oh) - 1) > 0.005:
+        return (ow, ow / fr) if fr > ow / oh else (oh * fr, oh)
+    return ow, oh
+
+
+def ov_x(o):
+    """overlay x expression. scroll (ticker) නම්: item එක canvas එක හරහා ගමන් කරලා අනිත් පැත්තෙන් ආපහු එනවා (preview එකේ wrapX එකම formula)"""
+    if o.get("scr"):
+        v = o["scr"] * o["spd"]
+        return (f"x='-overlay_w+mod(main_w*({o['x']:.5f})+overlay_w/2+({v:.5f})*main_w*(t-{o['start']:.3f})"
+                f"+100000*(main_w+overlay_w),main_w+overlay_w)'")
+    return f"x=main_w*({o['x']:.5f})-overlay_w/2"
+
+
 def atempo(s: float) -> str:
     parts = []
     while s < 0.5:
@@ -808,7 +878,7 @@ def atempo(s: float) -> str:
     return ",".join(f"atempo={p:.4f}" for p in parts)
 
 
-def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0):
+def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0, corners=None):
     chains, tags, n = [], "", len(clips)
     T = "(on/30)"
     for i, c in enumerate(clips):
@@ -827,10 +897,23 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
         frame_r = (fw * (sw or ow)) / (fh * (sh or oh))   # crop+zoom පස්සේ frame ratio (zoom එකෙන් වෙනස් වෙන්නේ නෑ)
         if abs(frame_r / (ow / oh) - 1) > 0.005:
             # frame ratio එක canvas ratio එකට වෙනස් -> canvas එකට fit කරලා කළු bars (CapCut වගේ)
-            v += (f",scale={ow}:{oh}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
-                  f",pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black,fps=30")
+            v += f",scale={ow}:{oh}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
+            post = f",pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black,fps=30"
         else:
-            v += f",scale={ow}:{oh}:flags=lanczos,fps=30"
+            v += f",scale={ow}:{oh}:flags=lanczos"
+            post = ",fps=30"
+        if corners and i in corners:
+            # rounded corners: scale කළ video region එකේ කොන් 4ට කළු quarter-circle cutouts overlay කරනවා (pad වලට කලින්)
+            ci = corners[i]
+            chains.append(v + f",fps=30[cb{i}]")
+            chains.append(f"[{ci}:v]format=rgba,split=4[k0_{i}][k1_{i}][k2_{i}][k3_{i}]")
+            chains.append(f"[k1_{i}]hflip[k1h{i}];[k2_{i}]vflip[k2v{i}];[k3_{i}]hflip,vflip[k3b{i}]")
+            chains.append(f"[cb{i}][k0_{i}]overlay=0:0:shortest=1:format=auto[o0_{i}]")
+            chains.append(f"[o0_{i}][k1h{i}]overlay=main_w-overlay_w:0:shortest=1:format=auto[o1_{i}]")
+            chains.append(f"[o1_{i}][k2v{i}]overlay=0:main_h-overlay_h:shortest=1:format=auto[o2_{i}]")
+            chains.append(f"[o2_{i}][k3b{i}]overlay=main_w-overlay_w:main_h-overlay_h:shortest=1:format=auto[co{i}]")
+            v = f"[co{i}]null"
+        v += post
         # transition sides: B = cut එකට පස්සේ (clip මුල), A = cut එකට කලින් (clip අග)
         B = (clips[i]["tr"]["type"], tr_half(clips, i)) if i > 0 and clips[i]["tr"]["type"] != "none" else None
         A = (clips[i + 1]["tr"]["type"], tr_half(clips, i + 1)) if i < n - 1 and clips[i + 1]["tr"]["type"] != "none" else None
@@ -894,8 +977,15 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     for k, im in enumerate(imgs or []):   # image overlays: FX වලට උඩින්, text වලට යටින්
         w = max(2, round(im["w"] * ow))
         opa = f",colorchannelmixer=aa={im['op']:.3f}" if im["op"] < 0.999 else ""
-        chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
-        chains.append(f"{vlabel}[im{k}]overlay=x=main_w*{im['x']:.5f}-overlay_w/2:y=main_h*{im['y']:.5f}-overlay_h/2"
+        if im.get("mi") is not None:   # rounded corners: image alpha × rounded-rect mask
+            chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:{im['ph']}:flags=lanczos,split[ia{k}][ib{k}]")
+            chains.append(f"[ia{k}]alphaextract,format=gray[iaa{k}]")
+            chains.append(f"[{im['mi']}:v]format=gray[imk{k}]")
+            chains.append(f"[iaa{k}][imk{k}]blend=all_mode=multiply[ina{k}]")
+            chains.append(f"[ib{k}][ina{k}]alphamerge{opa}[im{k}]")
+        else:
+            chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
+        chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:y=main_h*{im['y']:.5f}-overlay_h/2"
                       f":enable='between(t,{im['start']:.3f},{im['end']:.3f})':format=auto[vi{k}]")
         vlabel = f"[vi{k}]"
     for k, t in enumerate(texts or []):   # text layers: concat එකට පස්සේ overlay (flash/transition වලට උඩින්)
@@ -906,7 +996,7 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
         if t.get("op", 1) < 0.999:
             fl.append(f"colorchannelmixer=aa={t['op']:.3f}")
         chains.append(f"[{tbase + k}:v]" + ",".join(fl) + f"[tx{k}]")
-        chains.append(f"{vlabel}[tx{k}]overlay=x=main_w*{t['x']:.5f}-overlay_w/2:y=main_h*{t['y']:.5f}-overlay_h/2"
+        chains.append(f"{vlabel}[tx{k}]overlay={ov_x(t)}:y=main_h*{t['y']:.5f}-overlay_h/2"
                       f":enable='between(t,{t['start']:.3f},{t['end']:.3f})':format=auto[vt{k}]")
         vlabel = f"[vt{k}]"
     if texts or imgs:
@@ -943,7 +1033,30 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
             fxs = [dict(f, end=min(f["end"], total)) for f in (fxs or []) if f["start"] < total - 0.05]
             imgs = imgs or []
             ibase = tbase + len(texts)
-            graph, label, vlabel = build_graph(clips, ow, oh, info["has_audio"], sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase)
+            # rounded corners: extra PNG inputs (clip corner cutouts + image masks)
+            extra, corners = [], {}
+            nxt = ibase + len(imgs)
+            for i, c in enumerate(clips):
+                if c.get("rad", 0) > 0.002:
+                    rw, rh = region_px(c, ow, oh, sw0, sh0)
+                    R = max(1, min(round(c["rad"] * min(rw, rh)), int(min(rw, rh) // 2)))
+                    cp = d / f"corner_{i}.png"
+                    corner_png(cp, R)
+                    corners[i] = nxt + len(extra)
+                    extra.append(cp)
+            for k, im in enumerate(imgs):
+                if im.get("rad", 0) > 0.002:
+                    pi = probe(im["path"])
+                    if not pi["width"] or not pi["height"]:
+                        continue
+                    w = max(2, round(im["w"] * ow))
+                    h = max(2, round(w * pi["height"] / pi["width"]))
+                    R = max(1, round(im["rad"] * min(w, h)))
+                    mp = d / f"mask_{k}.png"
+                    mask_png(mp, w, h, R)
+                    im["mi"], im["ph"] = nxt + len(extra), h
+                    extra.append(mp)
+            graph, label, vlabel = build_graph(clips, ow, oh, info["has_audio"], sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners)
             tmp = d / "output_tmp.mp4"
             cmd = [FFMPEG, "-y", "-i", str(src)]
             for x in sfx:
@@ -954,6 +1067,8 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                 cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(t["path"])]
             for im in imgs:
                 cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(im["path"])]
+            for ep_ in extra:
+                cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(ep_)]
             cmd += ["-filter_complex", graph, "-map", vlabel]
             if label:
                 cmd += ["-map", label, "-c:a", "aac", "-b:a", "192k"]
@@ -978,8 +1093,9 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
         except Exception as e:
             job.update(status="error", error=str(e))
         finally:
-            for f in d.glob("txt_*.png"):
-                f.unlink(missing_ok=True)
+            for pat in ("txt_*.png", "corner_*.png", "mask_*.png"):
+                for f in d.glob(pat):
+                    f.unlink(missing_ok=True)
 
 
 @app.post("/api/projects/{pid}/export")

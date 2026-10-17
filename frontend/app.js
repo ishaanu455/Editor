@@ -5,7 +5,7 @@ let pid = null, meta = null, clips = [], sfx = [], music = null, assets = [], te
 let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, selImg = null, cur = 0, head = 0, playing = false, pps = 40;
 let undo = [], redo = [], saveT = null, gesture = false, zkey = '', swallow = false;
 let dirty = false, uiT = null, openTok = 0;   // dirty = save කරන්න තියෙන edit; openTok = project switch token
-const DEF = { speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null };
+const DEF = { speed: 1, zoom: 1, zx: 0.5, zy: 0.5, crop: null, rad: 0 };   // rad = corner radius (video region එකේ පොඩි පැත්තේ fraction, 0..0.5)
 let canvas = 'auto';   // output ratio: auto | orig | 'a:b'
 let cropMode = false, cropIdx = -1, cb = null, cratio = null;   // crop editor state
 const TRDEF = { type: 'none', dur: 0.4, snd: null, sv: 1 };
@@ -22,6 +22,14 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const asset = id => assets.find(a => a.id === id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clearSel = () => { sel = -1; selSfx = null; selMusic = false; selText = null; selFx = null; selImg = null; };
+
+// ---- scroll (ticker): text / image canvas එක හරහා ගමන් කරලා අනිත් පැත්තෙන් ආපහු එනවා (export එකේ backend ov_x() එකම formula) ----
+// t.x = item එකේ පටන් ගන්න තැන (center, 0..1) · t.scr = -1 වමට / 1 දකුණට / 0 නැහැ · t.spd = canvas width එකෙන් තත්පරයකට කීයද
+const scrDir = t => +t.scr || 0;
+const scrU = t => head >= t.start - 1e-6 && head < t.start + t.dur ? head - t.start : 0;
+const scrOff = t => scrDir(t) * (t.spd || 0.2) * scrU(t);
+const wrapX = (p, w) => { const L = 1 + w, lo = -w / 2; return lo + (((p - lo) % L) + L) % L; };
+const dispX = (t, w) => scrDir(t) ? wrapX(t.x + scrOff(t), w) : t.x;
 
 // ================= audio engine (SFX + music preview) =================
 let ac = null, live = [], prev = null;
@@ -153,8 +161,8 @@ function effRect(c) {
 }
 
 function applyZoom(c) {
-  const r = cropMode ? FULL : effRect(c), W = stage.clientWidth, H = stage.clientHeight, sa = srcA();
-  const k = [r.x, r.y, r.w, r.h, W, H, sa, !cropMode && c.crop ? 1 : 0].join('|');
+  const r = cropMode ? FULL : effRect(c), W = stage.clientWidth, H = stage.clientHeight, sa = srcA(), rad = cropMode ? 0 : +c.rad || 0;
+  const k = [r.x, r.y, r.w, r.h, W, H, sa, !cropMode && c.crop ? 1 : 0, rad].join('|');
   if (k === zkey) return;
   zkey = k;
   if (!W || !H) return;
@@ -166,8 +174,9 @@ function applyZoom(c) {
   zmst = { s, cx, cy, Vw, Vh, r, W, H };
   video.style.transformOrigin = '0 0';
   video.style.transform = `translate(${W / 2}px,${H / 2}px) scale(${s}) translate(${-cx}px,${-cy}px)`;
-  video.style.clipPath = r.w > 0.999 && r.h > 0.999 ? 'none'
-    : `inset(${r.y * 100}% ${Math.max(0, 1 - r.x - r.w) * 100}% ${Math.max(0, 1 - r.y - r.h) * 100}% ${r.x * 100}%)`;
+  const R = rad * Math.min(r.w * Vw, r.h * Vh);   // corner radius (video element local px; transform scale එකෙන් screen size එකට සමානයි)
+  video.style.clipPath = r.w > 0.999 && r.h > 0.999 && R < 0.5 ? 'none'
+    : `inset(${r.y * 100}% ${Math.max(0, 1 - r.x - r.w) * 100}% ${Math.max(0, 1 - r.y - r.h) * 100}% ${r.x * 100}%${R >= 0.5 ? ` round ${R.toFixed(2)}px` : ''})`;
 }
 
 function tick() {
@@ -207,6 +216,7 @@ function syncInsp() {
     if (document.activeElement !== $('#cdur')) $('#cdur').value = len(c).toFixed(2);
     $('#czoom').value = c.zoom; $('#czoomv').textContent = (+c.zoom).toFixed(2) + 'x';
     $('#zx').value = c.zx; $('#zy').value = c.zy;
+    const cr = Math.round((c.rad || 0) * 100); $('#crad').value = cr; $('#cradv').textContent = cr + '%';
     $('#croprm').hidden = !c.crop;
     const first = sel === 0, tr = c.tr || TRDEF;
     $('#trtype').value = tr.type;
@@ -241,7 +251,7 @@ function render() {
   };
   clips.forEach((c, i) => add('clip' + (i === sel ? ' sel' : ''),
     { left: off[i] * pps + 'px', width: len(c) * pps + 'px' },
-    `${fmt(c.start)}→${fmt(c.end)}` + (sp(c) !== 1 ? ` · ${sp(c)}x` : '') + (c.zoom > 1 ? ` · 🔍${(+c.zoom).toFixed(1)}` : '') + (c.crop ? ' · ✂crop' : '')));
+    `${fmt(c.start)}→${fmt(c.end)}` + (sp(c) !== 1 ? ` · ${sp(c)}x` : '') + (c.zoom > 1 ? ` · 🔍${(+c.zoom).toFixed(1)}` : '') + (c.crop ? ' · ✂crop' : '') + (c.rad > 0 ? ' · ◜round' : '')));
   clips.forEach((c, i) => {
     if (!i) return;
     const on = c.tr && c.tr.type !== 'none';
@@ -261,7 +271,7 @@ function render() {
     let rw = rowsEnd.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = rowsEnd.length; rowsEnd.push(0); }
     rowsEnd[rw] = t.start + t.dur;
     add('txi' + (t.id === selText ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: 144 + rw * 32 + 'px' },
-      'T  ' + (t.text.split('\n')[0] || '(empty)')).dataset.id = t.id;
+      (scrDir(t) ? (scrDir(t) < 0 ? 'T ⇠ ' : 'T ⇢ ') : 'T  ') + (t.text.split('\n')[0] || '(empty)')).dataset.id = t.id;
   });
   const nr = Math.max(1, rowsEnd.length);
   $('#txlane').style.height = nr * 32 + 2 + 'px';
@@ -270,7 +280,7 @@ function render() {
     let rw = imRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = imRows.length; imRows.push(0); }
     imRows[rw] = t.start + t.dur;
     add('imi' + (t.id === selImg ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: imTop + rw * 32 + 'px' },
-      (t.emoji ? '' : '🖼 ') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+      (t.emoji ? '' : '🖼 ') + (scrDir(t) ? (scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
@@ -683,6 +693,9 @@ document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => {
   if (sel < 0) return;
   snap('Clip speed'); clips[sel].speed = +b.dataset.sp; changed();
 });
+$('#crad').oninput = e => { const c = clips[sel]; if (!c) return; snapT('Corner radius'); c.rad = clampN(+e.target.value / 100, 0, 0.5); changed(); };
+$('#crad').onchange = e => e.target.blur();
+$('#cradall').onclick = e => { const c = clips[sel]; if (!c) return; snap('Corner radius (all clips)'); clips.forEach(x => x.rad = c.rad || 0); changed(); e.target.blur(); };
 $('#zreset').onclick = () => {
   if (sel < 0) return;
   snap('Remove zoom'); Object.assign(clips[sel], { zoom: 1, zx: 0.5, zy: 0.5 }); changed();
@@ -725,7 +738,7 @@ async function loadAssets() {
   try { assets = await (await fetch('/api/assets')).json(); } catch { return; }
   const mk = kind => assets.filter(a => a.kind === kind).map(a =>
     `<div class="asset" data-id="${a.id}">${kind === 'image' ? `<img class="ath" src="/api/assets/${a.id}/file" alt="">` : ''}<span class="an" title="${esc(a.name)}">${esc(a.name)}</span>` +
-    `<button data-act="add" title="Add">＋</button><button data-act="del" title="Delete">✕</button></div>`).join('') || '<i class="hint">—</i>';
+    `<button data-act="add" title="Add">＋</button>${kind === 'image' ? '<button data-act="addscr" title="Scrolling logo / image (වමට යනවා)">⇠</button>' : ''}<button data-act="del" title="Delete">✕</button></div>`).join('') || '<i class="hint">—</i>';
   $('#lib-sfx').innerHTML = mk('sfx'); $('#lib-music').innerHTML = mk('music'); $('#lib-img').innerHTML = mk('image');
   render(); preloadAudio();
 }
@@ -738,6 +751,7 @@ $('#lib').addEventListener('click', async e => {
     if (!confirm(`"${a.name}" library එකෙන් delete කරන්නද?`)) return;
     await fetch(`/api/assets/${a.id}`, { method: 'DELETE' }); loadAssets();
   } else if (act === 'add') a.kind === 'image' ? addImg(a) : addAsset(a);
+  else if (act === 'addscr' && a.kind === 'image') addImg(a, true);
   else if (e.target.classList.contains('an') && a.kind !== 'image') previewAsset(a);
 });
 
@@ -772,7 +786,7 @@ $('#export').onclick = async () => {
     for (const t of texts) {
       if (!t.text.trim()) continue;
       const rr = await renderTextPng(t, W);
-      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, start: t.start, end: t.start + t.dur });
+      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, scr: scrDir(t), spd: t.spd || 0.2, start: t.start, end: t.start + t.dur });
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
@@ -916,7 +930,7 @@ $('#homebtn').onclick = e => { goHome(); e.target.blur(); };
 
 // ================= text layers =================
 const TXDEF = { text: 'Text', font: 'Nirmala UI', size: 0.07, bold: false, italic: false, underline: false, outline: false,
-  color: '#ffffff', align: 'center', x: 0.5, y: 0.8, start: 0, dur: 3, op: 1 };
+  color: '#ffffff', align: 'center', x: 0.5, y: 0.8, start: 0, dur: 3, op: 1, scr: 0, spd: 0.2 };
 const SYS_FONTS = ['Nirmala UI', 'Iskoola Pota', 'Noto Sans Sinhala', 'Segoe UI', 'Arial', 'Verdana', 'Georgia', 'Times New Roman', 'Impact', 'Comic Sans MS'];
 const FALLBACK = '"Nirmala UI","Iskoola Pota","Noto Sans Sinhala","Noto Sans",sans-serif';   // සිංහල glyphs නැති font වලට fallback
 const COLORS = ['#ffffff', '#000000', '#ff3b30', '#ffd60a', '#34c759', '#0a84ff', '#ff9f0a', '#ff2d92', '#bf5af2', '#00e5ff'];
@@ -945,6 +959,8 @@ function placeEl(el, t, W) {
   const px = t.size * W;
   Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: PADK + 'em',
     fontFamily: fam(t.font), fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? 'italic' : 'normal', color: t.color, textAlign: t.align });
+  if (scrDir(t)) el.style.left = dispX(t, el._wf || 0.2) * 100 + '%';
+  el._xl = null;
   const tt = el.firstChild;
   tt.style.textDecoration = t.underline ? 'underline' : 'none';
   tt.style.webkitTextStroke = t.outline ? `${0.14 * px}px #000` : '0';
@@ -973,6 +989,11 @@ function applyText(force) {   // text එක පෙන්නන්නේ එහ�
     const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selText ? 2 : 0;
     const o = v === 2 ? 0.4 : (t.op ?? 1);
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
+    if (scrDir(t) && v) {   // scroll: හැම frame එකකම position එක update
+      el._wf = el.offsetWidth / (stage.clientWidth || 1) || 0.2;
+      const xl = dispX(t, el._wf);
+      if (el._xl !== xl) { el._xl = xl; el.style.left = xl * 100 + '%'; }
+    }
   }
 }
 
@@ -1015,7 +1036,9 @@ txov.addEventListener('pointerdown', e => {
   if (selText !== t.id) { clearSel(); selText = t.id; render(); }
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
-  const px0 = e.clientX, py0 = e.clientY, x0 = t.x, y0 = t.y, s0 = t.size, bw = el.offsetWidth, bh = el.offsetHeight;
+  const px0 = e.clientX, py0 = e.clientY, y0 = t.y, s0 = t.size, bw = el.offsetWidth, bh = el.offsetHeight;
+  const sc = scrDir(t), off = sc ? scrOff(t) : 0, x0 = dispX(t, bw / W);   // scroll text: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
+  const setX = cx => { t.x = sc ? wrapX(cx - off, bw / W) : cx; };
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -1029,7 +1052,7 @@ txov.addEventListener('pointerdown', e => {
       const k = Math.max(0.1, Math.min(8, (px * vx + py * vy) / (vx * vx + vy * vy)));
       t.size = Math.max(0.015, Math.min(0.5, s0 * k));
       const kk = t.size / s0;
-      t.x = (fx + sx * bw * kk / 2) / W; t.y = (fy + sy * bh * kk / 2) / H;
+      setX((fx + sx * bw * kk / 2) / W); t.y = (fy + sy * bh * kk / 2) / H;
     } else {
       let nx = x0 + dx / W, ny = y0 + dy / H, gv = null, gh = null;
       nx = Math.max(0, Math.min(1, nx)); ny = Math.max(0, Math.min(1, ny));
@@ -1039,7 +1062,7 @@ txov.addEventListener('pointerdown', e => {
         const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
         nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
-      t.x = nx; t.y = ny; guides(gv, gh);
+      setX(nx); t.y = ny; guides(gv, gh);
     }
     placeEl(el, t, W);
     if (selText === t.id) syncText(t, true);
@@ -1122,6 +1145,10 @@ function syncText(t, light) {   // light = drag වෙලාවේ number inputs
   if (document.activeElement !== $('#tdur')) $('#tdur').value = (+t.dur).toFixed(2);
   $('#tsize').value = t.size * 100; $('#tsizev').textContent = (t.size * 100).toFixed(1) + '%';
   const to = Math.round((t.op ?? 1) * 100); $('#topac').value = to; $('#topacv').textContent = to + '%';
+  const tx = Math.round(t.x * 100), ty = Math.round(t.y * 100), td = scrDir(t), ts = Math.round((t.spd || 0.2) * 100);
+  $('#tpx').value = tx; $('#tpxv').textContent = tx + '%'; $('#tpy').value = ty; $('#tpyv').textContent = ty + '%';
+  $('#tspd').value = ts; $('#tspdv').textContent = ts + '%/s'; $('#tspd').disabled = !td;
+  [['#tscr0', !td], ['#tscrL', td < 0], ['#tscrR', td > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
   if (light) return;
   if ($('#ttext').value !== t.text) $('#ttext').value = t.text;
   const mine = fonts.map(f => `<option value="uf_${f.id}">${esc(f.name)}</option>`).join('');
@@ -1152,6 +1179,13 @@ $('#tstart').onchange = e => editT('Text time', t => t.start = Math.max(0, +e.ta
 $('#tdur').onchange = e => editT('Text time', t => t.dur = Math.max(0.2, +e.target.value || 3));
 $('#tfit').onclick = e => { editT('Text → video end', t => { t.start = Math.min(t.start, Math.max(0, total() - MINT)); t.dur = Math.max(MINT, total() - t.start); }); e.target.blur(); };
 $('#tend').onclick = e => { editT('Text → playhead', t => { t.dur = Math.max(MINT, head - t.start); }); e.target.blur(); };
+$('#tpx').oninput = e => editT('Text X', t => t.x = +e.target.value / 100);
+$('#tpy').oninput = e => editT('Text Y', t => t.y = +e.target.value / 100);
+$('#tspd').oninput = e => editT('Text scroll speed', t => t.spd = clampN(+e.target.value / 100, 0.02, 1.5));
+['#tpx', '#tpy', '#tspd'].forEach(id => $(id).onchange = e => e.target.blur());
+$('#tscr0').onclick = e => { editT('Text scroll', t => t.scr = 0); e.target.blur(); };
+$('#tscrL').onclick = e => { editT('Text scroll', t => { t.scr = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#tscrR').onclick = e => { editT('Text scroll', t => { t.scr = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };
 $('#tcx').onclick = () => editT('Center text X', t => t.x = 0.5);
 $('#tcy').onclick = () => editT('Center text Y', t => t.y = 0.5);
 $('#tdup').onclick = () => { const t = curText(); if (!t) return; snap('Duplicate text'); const n = { ...t, id: uid(), x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; texts.push(n); selText = n.id; changed(); };
@@ -1161,6 +1195,15 @@ $('#addtext').onclick = () => {
   if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add text'); clearSel();
   const t = normT({ ...txStyle, id: uid(), x: 0.5, y: 0.8, start: +head.toFixed(2), dur: +Math.max(0.5, Math.min(3, total() - head)).toFixed(2) });
+  texts.push(t); selText = t.id; changed();
+  const a = $('#ttext'); a.focus(); a.select();
+};
+
+$('#addscroll').onclick = () => {   // ticker: playhead එකේ ඉඳන් video end එක දක්වා, වමට scroll වෙන text එකක්
+  if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
+  snap('Add scrolling text'); clearSel();
+  const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
+  const t = normT({ ...txStyle, id: uid(), text: 'Scrolling text', x: 0.5, y: 0.9, scr: -1, spd: 0.2, start, dur: +Math.max(0.5, T - start).toFixed(2) });
   texts.push(t); selText = t.id; changed();
   const a = $('#ttext'); a.focus(); a.select();
 };
@@ -1292,15 +1335,20 @@ $('#emq').oninput = renderEmojiGrid;
 $('#emgrid').addEventListener('click', e => { const b = e.target.closest('.emb'); if (b) addEmoji(b.dataset.u); });
 
 // ================= image overlays =================
-const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3 };
+const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3, rad: 0, scr: 0, spd: 0.2 };
 const normI = t => ({ ...IMDEF, ...t });
 const curImg = () => imgs.find(x => x.id === selImg);
 const imov = $('#imov');
 
 function placeImg(el, t) {
-  Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', width: t.w * 100 + '%' });
+  Object.assign(el.style, { left: dispX(t, t.w) * 100 + '%', top: t.y * 100 + '%', width: t.w * 100 + '%' });
+  el._xl = null;
   const im = el.firstChild, src = t.emoji ? `/api/emoji/${t.emoji}.png` : `/api/assets/${t.asset}/file`;
   if (im.getAttribute('src') !== src) im.src = src;
+  // corner radius (px): image එකේ පොඩි පැත්තේ fraction × radius
+  const a = t.emoji ? null : asset(t.asset), ar = im.naturalWidth && im.naturalHeight ? im.naturalWidth / im.naturalHeight : a?.w && a?.h ? a.w / a.h : 1;
+  const Wp = t.w * stage.clientWidth, Rp = (+t.rad || 0) * Math.min(Wp, Wp / ar);
+  im.style.borderRadius = Rp >= 0.5 ? Rp.toFixed(1) + 'px' : '0';
   el.classList.toggle('sel', t.id === selImg);
 }
 function renderImgs() {
@@ -1312,6 +1360,7 @@ function renderImgs() {
     if (!el) {
       el = document.createElement('div'); el.className = 'im'; el.dataset.id = t.id;
       el.innerHTML = '<img draggable="false" alt="">' + ['tl', 'tr', 'bl', 'br'].map(h => `<i class="th" data-h="${h}"></i>`).join('');
+      el.firstChild.onload = () => { const m = imgs.find(x => x.id === el.dataset.id); if (m) placeImg(el, m); };   // natural size ආවම radius ආයෙත් ගණන් කරනවා
       imov.appendChild(el);
     }
     placeImg(el, t);
@@ -1325,16 +1374,23 @@ function applyImg(force) {   // image එක පෙන්නන්නේ එහ�
     const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selImg ? 2 : 0;
     const o = v === 2 ? 0.35 : t.op;
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
+    if (scrDir(t) && v) {   // scroll: හැම frame එකකම position එක update
+      const xl = dispX(t, t.w);
+      if (el._xl !== xl) { el._xl = xl; el.style.left = xl * 100 + '%'; }
+    }
   }
 }
 
-function addImg(a) {
+function addImg(a, scroll) {
   if (!clips.length) { setStatus('මුලින් project එකක් open කරන්න'); return; }
   snap('Add image'); clearSel();
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
   const nat = a.w && a.h ? a.w / a.h : 1, ca = canvasAspect();
   let w = 0.4; if (w * ca / nat > 0.5) w = 0.5 * nat / ca;   // canvas එකේ උස භාගයකට වඩා නොවෙන්න
   const t = normI({ id: uid(), asset: a.id, x: 0.5, y: 0.5, w: +w.toFixed(3), op: 1, start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
+  if (scroll) {   // scrolling logo: පොඩි size, පහළට ළඟින්, video end එක දක්වා, වමට යනවා
+    t.w = +Math.min(t.w, 0.2).toFixed(3); t.y = 0.9; t.scr = -1; t.spd = 0.2; t.dur = +Math.max(0.5, T - start).toFixed(2);
+  }
   imgs.push(t); selImg = t.id; changed();
   if (head < t.start || head >= t.start + t.dur) seek(t.start + 0.01);   // playhead එක image range එක ඇතුළට
 }
@@ -1354,8 +1410,10 @@ imov.addEventListener('pointerdown', e => {
   if (selImg !== t.id) { clearSel(); selImg = t.id; render(); }
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
-  const px0 = e.clientX, py0 = e.clientY, x0 = t.x, y0 = t.y, w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
-  const isG = !!t.grp, list = grpList(t), gc = grpCenter(list);   // group = emoji කීපයක් එකට (spacing + size fixed, center)
+  const px0 = e.clientX, py0 = e.clientY, x0 = dispX(t, t.w), y0 = t.y, w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
+  const isG = !!t.grp, list = grpList(t), gc = grpCenter(list);
+  const sc = !isG && scrDir(t), off = sc ? scrOff(t) : 0;   // scroll image: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
+  const setX = cx => { t.x = sc ? wrapX(cx - off, t.w) : cx; };   // group = emoji කීපයක් එකට (spacing + size fixed, center)
   const gd0 = Math.hypot(e.clientX - R.left - gc.cx * W, e.clientY - R.top - gc.cy * H) || 1;
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
@@ -1386,7 +1444,7 @@ imov.addEventListener('pointerdown', e => {
         const k = Math.max(0.05, Math.min(10, (px * vx + py * vy) / (vx * vx + vy * vy)));
         t.w = Math.max(0.03, Math.min(4, w0 * k));
         const kk = t.w / w0;
-        t.x = (fx + sx * bw * kk / 2) / W; t.y = (fy + sy * bh * kk / 2) / H;
+        setX((fx + sx * bw * kk / 2) / W); t.y = (fy + sy * bh * kk / 2) / H;
       } else {
         let nx = clampN(x0 + dx / W, 0, 1), ny = clampN(y0 + dy / H, 0, 1), gv = null, gh = null;
         if (snapOn && !ev.altKey) {
@@ -1395,7 +1453,7 @@ imov.addEventListener('pointerdown', e => {
           const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
           nx = a.c; ny = b.c; gv = a.line; gh = b.line;
         }
-        t.x = nx; t.y = ny; guides(gv, gh);
+        setX(nx); t.y = ny; guides(gv, gh);
       }
       placeImg(el, t);
     }
@@ -1417,6 +1475,14 @@ function syncImg(t, light) {
   const sz = Math.round(t.w * 100), op = Math.round(t.op * 100);
   $('#isize').value = sz; $('#isizev').textContent = sz + '%';
   $('#iop').value = op; $('#iopv').textContent = op + '%';
+  const rd = Math.round((t.rad || 0) * 100), px = Math.round(t.x * 100), py = Math.round(t.y * 100), sd = scrDir(t), ss = Math.round((t.spd || 0.2) * 100);
+  $('#irad').value = rd; $('#iradv').textContent = rd + '%';
+  $('#ipx').value = px; $('#ipxv').textContent = px + '%'; $('#ipy').value = py; $('#ipyv').textContent = py + '%';
+  $('#ispd').value = ss; $('#ispdv').textContent = ss + '%/s';
+  [['#iscr0', !sd], ['#iscrL', sd < 0], ['#iscrR', sd > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
+  const grouped = !!t.grp && grpList(t).length > 1;   // emoji group = scroll නෑ
+  ['#iscr0', '#iscrL', '#iscrR', '#ipx', '#ipy'].forEach(id => $(id).disabled = grouped);
+  $('#ispd').disabled = grouped || !sd; $('#iscrnote').textContent = grouped ? 'Emoji group එකට scroll/position slider නෑ (Ungroup කරන්න)' : sd ? 'X = පටන් ගන්න තැන · preview එකේ mouse එකෙන් drag කරන්න පුළුවන්' : '';
   if (light) return;
   const n = grpList(t).length;
   $('#iname').textContent = imLabel(t) + (t.grp && n > 1 ? ` · group (${n})` : '');
@@ -1426,6 +1492,14 @@ function editI(label, fn) { const t = curImg(); if (!t) return; snapT(label); fn
 $('#iop').oninput = e => editI('Image opacity', t => grpList(t).forEach(m => m.op = clampN(+e.target.value / 100, 0, 1)));
 $('#isize').oninput = e => editI('Image size', t => { const w = Math.max(0.03, +e.target.value / 100); if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, c.cy, w); } else t.w = w; });
 ['#iop', '#isize'].forEach(id => $(id).onchange = e => e.target.blur());
+$('#irad').oninput = e => editI('Image corner radius', t => t.rad = clampN(+e.target.value / 100, 0, 0.5));
+$('#ipx').oninput = e => editI('Image X', t => t.x = +e.target.value / 100);
+$('#ipy').oninput = e => editI('Image Y', t => t.y = +e.target.value / 100);
+$('#ispd').oninput = e => editI('Image scroll speed', t => t.spd = clampN(+e.target.value / 100, 0.02, 1.5));
+['#irad', '#ipx', '#ipy', '#ispd'].forEach(id => $(id).onchange = e => e.target.blur());
+$('#iscr0').onclick = e => { editI('Image scroll', t => t.scr = 0); e.target.blur(); };
+$('#iscrL').onclick = e => { editI('Image scroll', t => { t.scr = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#iscrR').onclick = e => { editI('Image scroll', t => { t.scr = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };
 $('#istart').onchange = e => editI('Image time', t => t.start = Math.max(0, +e.target.value || 0));
 $('#idur').onchange = e => editI('Image time', t => t.dur = Math.max(0.2, +e.target.value || 3));
 $('#ifit').onclick = e => { editI('Image → video end', t => { t.start = Math.min(t.start, Math.max(0, total() - MINT)); t.dur = Math.max(MINT, total() - t.start); }); e.target.blur(); };
@@ -1452,16 +1526,19 @@ function addFx(type) {
 }
 function delFx() { if (!selFx) return; snap('Delete effect'); fxs = fxs.filter(x => x.id !== selFx); selFx = null; changed(); }
 function syncFx(f, light) {
+  if (document.activeElement !== $('#famtn')) $('#famtn').value = Math.round(f.amt * 100);
   if (document.activeElement !== $('#fstart')) $('#fstart').value = (+f.start).toFixed(2);
   if (document.activeElement !== $('#fdur')) $('#fdur').value = (+f.dur).toFixed(2);
   if (light) return;
   $('#fname').textContent = FXN[f.type] || f.type;
-  $('#famt').value = f.amt; $('#famtv').textContent = Math.round(f.amt * 100) + '%';
+  $('#famt').value = f.amt;
 }
 function editF(label, fn) { const f = curFx(); if (!f) return; snapT(label); fn(f); changed(); }
 $('#fxbtns').onclick = e => { const b = e.target.closest('button'); if (b) { addFx(b.dataset.fx); b.blur(); } };
-$('#famt').oninput = e => editF('Effect intensity', f => f.amt = +e.target.value);
+$('#famt').oninput = e => editF('Effect intensity', f => f.amt = clampN(+e.target.value, 0.01, 1.5));
 $('#famt').onchange = e => e.target.blur();
+$('#famtn').oninput = e => { const v = +e.target.value; if (v >= 1) editF('Effect intensity', f => f.amt = clampN(v / 100, 0.01, 1.5)); };
+$('#famtn').onchange = e => { e.target.value = Math.round(clampN((+e.target.value || 60) / 100, 0.01, 1.5) * 100); };
 $('#fstart').onchange = e => editF('Effect time', f => f.start = Math.max(0, +e.target.value || 0));
 $('#fdur').onchange = e => editF('Effect time', f => f.dur = Math.max(0.1, +e.target.value || 1));
 $('#ffull').onclick = e => { editF('Effect → whole video', f => { f.start = 0; f.dur = total(); }); e.target.blur(); };
@@ -1539,14 +1616,14 @@ function applyVfx() {
     if (!vfx.tile) { vfx.tile = noiseTile(); gr.style.backgroundImage = `url(${vfx.tile})`; }
     const k = Math.floor(head * 14);
     if (vfx.gk !== k) { vfx.gk = k; gr.style.backgroundPosition = `${Math.floor(hh(k * 1.7) * 192)}px ${Math.floor(hh(k * 2.9) * 192)}px`; }
-    gr.style.opacity = ga * 0.9;
+    gr.style.opacity = Math.min(1, ga * 0.9);
   }
   if (!!ga !== vfx.g) { vfx.g = !!ga; gr.style.display = ga ? 'block' : 'none'; }
   // vintage (video filter + vignette/warm overlay)
   const vf = va ? `sepia(${(0.5 * va).toFixed(3)}) contrast(${(1 + 0.1 * va).toFixed(3)}) saturate(${(1 - 0.25 * va).toFixed(3)}) brightness(${(1 + 0.03 * va).toFixed(3)})` : '';
   if (vfx.vf !== vf) { vfx.vf = vf; zw.style.filter = vf; }
   const vv = $('#vvg');
-  if (vfx.va !== va) { vfx.va = va; vv.style.opacity = va; }
+  if (vfx.va !== va) { vfx.va = va; vv.style.opacity = Math.min(1, va); }
   if (!!va !== vfx.v) { vfx.v = !!va; vv.style.display = va ? 'block' : 'none'; }
   // dust & scratches (≈12fps)
   const du = $('#vdu');

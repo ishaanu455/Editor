@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <header>
@@ -39,8 +39,8 @@
 <div id="cols"><div id="lcol">
 <main>
   <aside id="lib">
-    <h4>Text <button class="sm" id="addtext" title="Playhead එකට text එකක් add කරන්න">+ Add text</button></h4>
-    <p class="hint">Preview එකේ text එක drag = move · කොන් drag = size · double-click = edit</p>
+    <h4>Text <button class="sm" id="addtext" title="Playhead එකට text එකක් add කරන්න">+ Add text</button> <button class="sm" id="addscroll" title="Scroll වෙන text (ticker) එකක් add කරන්න">⇠ Scrolling text</button></h4>
+    <p class="hint">Preview එකේ text එක drag = move · කොන් drag = size · double-click = edit<br>⇠ Scrolling text = වමට/දකුණට ගමන් කරන text (speed, opacity, position inspector එකේ). Logo/image එකක් scroll කරන්න image library එකේ ⇠ button එක</p>
     <h4>Images <label class="btn sm">+ upload<input id="up-img" type="file" accept="image/*" multiple hidden></label></h4>
     <div id="lib-img"></div>
     <p class="hint">＋ = playhead එකට image එක add · preview එකේ image එක drag = move · කොන් drag = size · Opacity = පහළ inspector එකේ · timeline එකේ Image lane එකේ magnetic snap වෙනවා</p>
@@ -107,6 +107,8 @@
       <button id="zreset">Zoom අයින් කරන්න</button>
       <button id="cropbtn" title="Crop (C)">⛶ Crop</button>
       <button id="croprm" hidden>Crop අයින් කරන්න</button>
+      <label title="Video (crop කළ කොටසේ) කොන් round කරන්න — preview + export දෙකටම">Corner radius <input id="crad" type="range" min="0" max="50" step="1" value="0"> <span id="cradv" class="v"></span></label>
+      <button id="cradall" title="මේ radius එක හැම clip එකටම">හැම clip එකටම</button>
     </div>
     <div class="ig">
       <b>Transition (clip එකේ මුල)</b>
@@ -145,12 +147,31 @@
       <button id="tcx" title="Horizontal center">⇔ Center X</button><button id="tcy" title="Vertical center">⇕ Center Y</button>
       <button id="tdup">Duplicate</button><button id="tdel">Delete text</button>
     </div>
+    <div class="ig">
+      <b>Position</b>
+      <label>X <input id="tpx" type="range" min="0" max="100" step="0.5"> <span id="tpxv" class="v"></span></label>
+      <label>Y <input id="tpy" type="range" min="0" max="100" step="0.5"> <span id="tpyv" class="v"></span></label>
+      <b>Scroll</b>
+      <span><button id="tscr0" class="tog" title="Scroll නෑ">Off</button><button id="tscrL" class="tog" title="දකුණේ ඉඳන් වමට යනවා">⯇ Left</button><button id="tscrR" class="tog" title="වමේ ඉඳන් දකුණට යනවා">Right ⯈</button></span>
+      <label>Speed <input id="tspd" type="range" min="2" max="150" step="1" value="20"> <span id="tspdv" class="v"></span></label>
+      <span class="hint">Scroll on නම් X = පටන් ගන්න තැන · preview එකේ mouse එකෙන් drag කරලා ඕනෑම තැනකට ගන්න පුළුවන්</span>
+    </div>
   </div>
   <div class="ig col" id="i-img" hidden>
     <div class="ig">
       <b>Image: <span id="iname"></span></b>
       <label>Opacity <input id="iop" type="range" min="0" max="100" step="1" value="100"> <span id="iopv" class="v"></span></label>
       <label>Size <input id="isize" type="range" min="3" max="200" step="1" value="40"> <span id="isizev" class="v"></span></label>
+      <label title="Image එකේ කොන් round කරන්න">Corner radius <input id="irad" type="range" min="0" max="50" step="1" value="0"> <span id="iradv" class="v"></span></label>
+    </div>
+    <div class="ig">
+      <b>Position</b>
+      <label>X <input id="ipx" type="range" min="0" max="100" step="0.5"> <span id="ipxv" class="v"></span></label>
+      <label>Y <input id="ipy" type="range" min="0" max="100" step="0.5"> <span id="ipyv" class="v"></span></label>
+      <b>Scroll</b>
+      <span><button id="iscr0" class="tog" title="Scroll නෑ">Off</button><button id="iscrL" class="tog" title="දකුණේ ඉඳන් වමට යනවා">⯇ Left</button><button id="iscrR" class="tog" title="වමේ ඉඳන් දකුණට යනවා">Right ⯈</button></span>
+      <label>Speed <input id="ispd" type="range" min="2" max="150" step="1" value="20"> <span id="ispdv" class="v"></span></label>
+      <span class="hint" id="iscrnote"></span>
     </div>
     <div class="ig">
       <label>Start (s) <input id="istart" type="number" min="0" step="0.1" style="width:70px"></label>
@@ -174,7 +195,7 @@
   </div>
   <div class="ig" id="i-fx" hidden>
     <b>Effect: <span id="fname"></span></b>
-    <label>Intensity <input id="famt" type="range" min="0.05" max="1" step="0.05" value="0.6"> <span id="famtv" class="v"></span></label>
+    <label title="1% – 150% (vintage / dust වල opacity උපරිමය 100%, grain / glitch 150% දක්වා තව තද වෙනවා)">Intensity <input id="famt" type="range" min="0.01" max="1.5" step="0.01" value="0.6"> <input id="famtn" type="number" min="1" max="150" step="1" style="width:62px"> %</label>
     <label>Start (s) <input id="fstart" type="number" min="0" step="0.1" style="width:70px"></label>
     <label>Duration (s) <input id="fdur" type="number" min="0.1" step="0.1" style="width:70px"></label>
     <button id="ffull" title="මුළු video එකටම">Whole video</button><button id="fend" title="අග = video එකේ අග">⇥ Video end</button>
@@ -193,6 +214,6 @@
 </div></div>
 </div></div>
 <div id="toast"></div>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

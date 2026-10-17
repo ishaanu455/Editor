@@ -22,12 +22,12 @@ AegisX Editor is a lightweight, timeline-based video editor that runs entirely i
 | Area | Capabilities |
 | --- | --- |
 | **Timeline** | Split, delete, undo / redo, magnetic snapping, zoom, grid overlay |
-| **Video** | Crop with aspect-ratio presets or free crop, speed control (0.25x to 8x), clip transitions (flash, zoom whoosh, shake, dip to black) |
+| **Video** | Crop with aspect-ratio presets or free crop, speed control (0.25x to 8x), rounded corners on the cropped video, clip transitions (flash, zoom whoosh, shake, dip to black) |
 | **Canvas** | Original, 9:16, 16:9, 1:1, 4:5, 3:4, 4:3 or auto-fit to crop |
-| **Text** | Custom fonts, bold / italic / underline, outline, alignment, colors, drag and resize directly on the preview |
-| **Images** | PNG, JPG, WebP and more with full transparency support, opacity, move, resize, timed overlays |
+| **Text** | Custom fonts, bold / italic / underline, outline, alignment, colors, drag and resize directly on the preview, scrolling ticker text (left / right, speed, opacity, X / Y position) |
+| **Images** | PNG, JPG, WebP and more with full transparency support, opacity, move, resize, rounded corners, scrolling logos (left / right, speed), timed overlays |
 | **Audio** | SFX and music libraries, per-item volume, shared across projects |
-| **Effects** | Grain, vintage, dust and glitch layers on the timeline |
+| **Effects** | Grain, vintage, dust and glitch layers on the timeline, intensity 1% to 150% |
 | **Export** | 1080p, 720p or original size, fast or best-quality presets, one-click download |
 
 ### Keyboard shortcuts
