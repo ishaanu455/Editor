@@ -1,66 +1,93 @@
 <!doctype html>
-<html lang="si">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <header>
-  <b>AegisX Editor</b>
-  <button id="homebtn" title="Projects වෙත ආපසු">🏠 Projects</button>
-  <label class="btn">+ New project<input id="file" type="file" accept="video/*,image/*" hidden></label>
+  <div class="brand"><span class="logo">A</span><b>AegisX</b><span class="brand-sub">Editor</span></div>
+  <div class="hgrp">
+    <button id="homebtn" title="Back to projects">🏠 Projects</button>
+    <label class="btn primary" title="Upload a video or image to start a new project">＋ New project<input id="file" type="file" accept="video/*,image/*" hidden></label>
+  </div>
   <span id="status"></span>
-  <button id="layout" title="Preview එක තියෙන තැන">◨ Preview right</button>
   <div id="xwrap">
     <select id="canvas" title="Canvas ratio (preview + export)">
-      <option value="auto">Canvas: Auto (crop එකට)</option><option value="orig">Canvas: Original</option>
+      <option value="auto">Canvas: Auto (follow crop)</option><option value="orig">Canvas: Original</option>
       <option value="9:16">Canvas: 9:16</option><option value="16:9">Canvas: 16:9</option><option value="1:1">Canvas: 1:1</option>
       <option value="4:5">Canvas: 4:5</option><option value="3:4">Canvas: 3:4</option><option value="4:3">Canvas: 4:3</option>
     </select>
     <select id="xres" title="Output size">
-      <option value="hd">Auto HD (≥1080, තියුණුම text)</option><option value="0">Original size</option><option value="1080">1080 wide</option><option value="1440">1440 wide</option><option value="2160">2160 wide (4K)</option><option value="720">720 wide</option>
+      <option value="hd">Size: Auto HD (≥1080)</option><option value="0">Size: Original</option><option value="1080">Size: 1080 wide</option><option value="1440">Size: 1440 wide</option><option value="2160">Size: 2160 wide (4K)</option><option value="720">Size: 720 wide</option>
     </select>
     <select id="xpreset" title="Speed / quality">
-      <option value="veryfast">Fast</option><option value="medium">Best quality (slow)</option>
+      <option value="veryfast">Quality: Fast</option><option value="medium">Quality: Best (slow)</option>
     </select>
-    <button id="export">⬇ Export</button>
+    <button id="export" class="primary">⬇ Export</button>
     <progress id="xbar" max="1" value="0" hidden></progress>
     <span id="xstat"></span>
-    <a id="dl" class="btn" download hidden>Download</a>
+    <a id="dl" class="btn ok" download hidden>Download</a>
   </div>
 </header>
+
 <div id="home">
   <h2>Projects</h2>
-  <p class="hint" id="hmsg">Video එකක් upload කරලා අලුත් project එකක් හදන්න. හැම edit එකක්ම auto-save වෙනවා.</p>
+  <p class="hint" id="hmsg">Upload a video to create a new project. Every edit is saved automatically.</p>
   <div id="plist"></div>
 </div>
-<div id="cols"><div id="lcol">
-<main>
+
+<div id="cols">
+  <!-- ===== left: library ===== -->
   <aside id="lib">
-    <h4>Text <button class="sm" id="addtext" title="Playhead එකට text එකක් add කරන්න">+ Add text</button> <button class="sm" id="addscroll" title="Scroll වෙන text (ticker) එකක් add කරන්න">⇠ Scrolling text</button></h4>
-    <p class="hint">Preview එකේ text එක drag = move · කොන් drag = size · double-click = edit<br>⇠ Scrolling text = වමට/දකුණට/උඩට/පහළට ගමන් කරන text (direction, speed, opacity, position inspector එකේ · Whole video = මුළු video එකටම). Logo/image එකක් scroll කරන්න image library එකේ ⇠ button එක, ඉන්පසු inspector එකෙන් direction (Left/Right/Up/Down) තෝරන්න</p>
-    <h4>Images <label class="btn sm">+ upload<input id="up-img" type="file" accept="image/*" multiple hidden></label></h4>
-    <div id="lib-img"></div>
-    <p class="hint">＋ = playhead එකට image එක add · preview එකේ image එක drag = move · කොන් drag = size · Opacity = පහළ inspector එකේ · timeline එකේ Image lane එකේ magnetic snap වෙනවා</p>
-    <h4>Emoji <span class="hint" style="font-weight:400">(Apple style)</span></h4>
-    <div id="emtools"><input id="emq" type="search" placeholder="search…"><select id="emcat"></select></div>
-    <label class="emj"><input type="checkbox" id="emjoin" checked> Selected emoji එක්ක group කරන්න</label>
-    <button id="eminstall" class="sm" hidden>⬇ Apple emoji library install කරන්න</button>
-    <div id="emgrid"></div>
-    <p class="hint" id="emhint"></p>
-    <h4>Effects</h4>
-    <div id="fxbtns"><button data-fx="grain">🎞 Grain</button><button data-fx="vintage">📼 Vintage</button><button data-fx="dust">✨ Dust</button><button data-fx="glitch">📺 Glitch</button></div>
-    <p class="hint">Timeline එකේ FX lane එකට add වෙනවා. ඇදලා ගෙනියන්න / කොන් ඇදලා දිග වෙනස් කරන්න. 🧲 Snap on නම් video end එකට ඇලෙනවා.</p>
-    <h4>SFX <label class="btn sm">+ upload<input id="up-sfx" type="file" accept="audio/*" multiple hidden></label></h4>
-    <div id="lib-sfx"></div>
-    <h4>Music <label class="btn sm">+ upload<input id="up-music" type="file" accept="audio/*" multiple hidden></label></h4>
-    <div id="lib-music"></div>
-    <p class="hint">නම click = preview<br>＋ = SFX එක playhead එකට / music එක background එකට</p>
+    <nav id="libtabs">
+      <button data-tab="text" class="on" title="Text layers"><i>T</i>Text</button>
+      <button data-tab="media" title="Images and logos"><i>🖼</i>Media</button>
+      <button data-tab="emoji" title="Emoji"><i>😀</i>Emoji</button>
+      <button data-tab="fx" title="Video effects"><i>✨</i>FX</button>
+      <button data-tab="audio" title="Sound effects and music"><i>🎵</i>Audio</button>
+    </nav>
+    <div id="libbody">
+      <section class="tab" data-tab="text">
+        <h4>Text</h4>
+        <div class="btnrow">
+          <button class="wide" id="addtext" title="Add a text layer at the playhead">＋ Add text</button>
+          <button class="wide" id="addscroll" title="Add a scrolling text (ticker)">⇠ Scrolling text</button>
+        </div>
+        <p class="hint">Drag the text in the preview to move it, drag a corner to resize, double-click to edit.<br>Scrolling text can move left, right, up or down — choose the direction, speed and position in the inspector. Use <b>Whole video</b> to keep it on screen for the entire video.</p>
+      </section>
+      <section class="tab" data-tab="media" hidden>
+        <h4>Images <label class="btn sm">＋ Upload<input id="up-img" type="file" accept="image/*" multiple hidden></label></h4>
+        <div id="lib-img"></div>
+        <p class="hint">＋ adds the image at the playhead · ⇠ adds it as a scrolling logo (set the direction in the inspector). Drag in the preview to move, drag a corner to resize. Items snap magnetically on the timeline.</p>
+      </section>
+      <section class="tab" data-tab="emoji" hidden>
+        <h4>Emoji <span class="hint">Apple style</span></h4>
+        <div id="emtools"><input id="emq" type="search" placeholder="Search…"><select id="emcat"></select></div>
+        <label class="emj"><input type="checkbox" id="emjoin" checked> Group with the selected emoji</label>
+        <button id="eminstall" class="sm" hidden>⬇ Install Apple emoji library</button>
+        <div id="emgrid"></div>
+        <p class="hint" id="emhint"></p>
+      </section>
+      <section class="tab" data-tab="fx" hidden>
+        <h4>Effects</h4>
+        <div id="fxbtns"><button data-fx="grain">🎞 Grain</button><button data-fx="vintage">📼 Vintage</button><button data-fx="dust">✨ Dust</button><button data-fx="glitch">📺 Glitch</button></div>
+        <p class="hint">Effects are added to the FX lane of the timeline. Drag to move, drag the edges to change the length. With Snap on, they stick to the end of the video.</p>
+      </section>
+      <section class="tab" data-tab="audio" hidden>
+        <h4>Sound effects <label class="btn sm">＋ Upload<input id="up-sfx" type="file" accept="audio/*" multiple hidden></label></h4>
+        <div id="lib-sfx"></div>
+        <h4>Music <label class="btn sm">＋ Upload<input id="up-music" type="file" accept="audio/*" multiple hidden></label></h4>
+        <div id="lib-music"></div>
+        <p class="hint">Click a name to preview.<br>＋ adds an SFX at the playhead, or music as the background track.</p>
+      </section>
+    </div>
   </aside>
-  <div id="mid"></div>
-  <div id="sw"><div id="stage"><div id="zw"><video id="video" playsinline preload="auto"></video></div><div id="fx"></div><div id="vvg"></div><div id="vgr"></div><canvas id="vdu"></canvas><canvas id="vgl"></canvas>
+
+  <!-- ===== center: preview ===== -->
+  <section id="sw"><div id="stage"><div id="zw"><video id="video" playsinline preload="auto"></video></div><div id="fx"></div><div id="vvg"></div><div id="vgr"></div><canvas id="vdu"></canvas><canvas id="vgl"></canvas>
     <div id="gridov" hidden></div><div id="imov"></div><div id="txov"></div><div class="gl v" id="gv" hidden></div><div class="gl h" id="gh" hidden></div>
     <div id="cropov" hidden><div id="cbox"><i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i>
       <b class="hd" data-h="tl"></b><b class="hd" data-h="t"></b><b class="hd" data-h="tr"></b><b class="hd" data-h="r"></b>
@@ -68,156 +95,212 @@
     </div></div>
     <div id="idleh" hidden><b class="hd ih" data-h="tl"></b><b class="hd ih" data-h="t"></b><b class="hd ih" data-h="tr"></b><b class="hd ih" data-h="r"></b>
       <b class="hd ih" data-h="br"></b><b class="hd ih" data-h="b"></b><b class="hd ih" data-h="bl"></b><b class="hd ih" data-h="l"></b></div>
-  </div></div>
-</main>
-<div class="bar" id="pbar">
-  <button id="play">▶ Play (Space)</button>
-  <button id="split">✂ Split (S)</button>
-  <button id="del">🗑 Delete</button>
-  <button id="undo">↶</button><button id="redo">↷</button>
-  <button id="linkbtn" class="tog on" title="Linked: main item එක delete කරන්න බෑ (ඉතිරි items ආරක්ෂිතයි). Unlink කළොත් main එක විතරක් delete කරන්න පුළුවන් — ඉතිරි items (text / image / FX / SFX / music) delete වෙන්නේ නෑ, duration ඒවගේම තියෙනවා">🔗 Linked</button>
-  <label class="btn" id="replbtn" title="Main video / image එක වෙනස් කරන්න — ඉතිරි items සේරම තියෙනවා">🔁 Replace main<input id="replfile" type="file" accept="video/*,image/*" hidden></label>
-  <button id="mutebtn" class="tog" title="Main video එකේ sound එක mute / unmute (preview + export)">🔊 Main sound</button>
-  <button id="extractbtn" title="Main video එකේ audio එක Music library එකට extract කරන්න">🎵 Extract audio</button>
-  <span id="time">0:00.0 / 0:00.0</span>
-  <button id="snapbtn" class="tog" title="Magnetic snap: timeline items + seek bar (Alt = temporarily off)">🧲 Snap</button>
-  <button id="gridbtn" class="tog" title="Grid lines (thirds + center)">▦ Grid</button>
-  <label>Timeline zoom <input id="tzoom" type="range" min="10" max="200" value="40"></label>
+  </div></section>
+
+  <!-- ===== right: inspector ===== -->
+  <aside id="side">
+    <div class="phead">Properties</div>
+    <div id="sidebody">
+      <div class="bar insp" id="cropbar" hidden>
+        <div class="ig col">
+          <div class="ig"><b>Crop</b></div>
+          <div class="ig"><span id="ratios">
+            <button data-r="free" class="on">Free</button><button data-r="orig">Original</button>
+            <button data-r="9:16">9:16</button><button data-r="16:9">16:9</button><button data-r="1:1">1:1</button>
+            <button data-r="4:5">4:5</button><button data-r="3:4">3:4</button><button data-r="4:3">4:3</button>
+          </span></div>
+          <div class="ig">
+            <label>Size <input id="csize" type="range" min="8" max="100" step="1" value="100"></label>
+            <span id="cinfo" class="hint"></span>
+            <label class="chk"><input type="checkbox" id="call"> Apply to every clip</label>
+          </div>
+          <div class="ig actions">
+            <button id="cfull">Reset</button>
+            <button id="capply" class="ok">✔ Apply (Enter)</button>
+            <button id="ccancel">✕ Cancel (Esc)</button>
+          </div>
+        </div>
+      </div>
+      <div class="bar insp" id="insp" hidden>
+        <div class="ig col" id="i-clip" hidden>
+          <div class="ig">
+            <b>Clip</b>
+            <label title="Clip length in seconds — an image clip can be extended up to 300s (5 min)">Duration <input id="cdur" type="number" min="0.2" step="0.1" style="width:64px"> s</label>
+            <label>Speed <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1"> <span id="speedv" class="v">1x</span></label>
+            <span class="btnrow"><button data-sp="1">1x</button> <button data-sp="2">2x</button> <button data-sp="4">4x</button> <button data-sp="8">8x</button></span>
+          </div>
+          <div class="ig">
+            <b>Zoom</b>
+            <label>Zoom <input id="czoom" type="range" min="1" max="3" step="0.05" value="1"> <span id="czoomv" class="v">1.00x</span></label>
+            <label>X <input id="zx" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+            <label>Y <input id="zy" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+            <button id="zreset">Reset zoom</button>
+          </div>
+          <div class="ig">
+            <b>Crop &amp; shape</b>
+            <span class="btnrow"><button id="cropbtn" title="Crop (C)">⛶ Crop</button>
+            <button id="croprm" hidden>Remove crop</button></span>
+            <label title="Round the corners of the video (cropped area) — preview + export">Corner radius <input id="crad" type="range" min="0" max="50" step="1" value="0"> <span id="cradv" class="v"></span></label>
+            <button id="cradall" title="Use this radius on every clip">Apply to every clip</button>
+          </div>
+          <div class="ig">
+            <b>Transition (start of clip)</b>
+            <select id="trtype">
+              <option value="none">None (cut)</option><option value="flash">⚡ Flash</option>
+              <option value="zoom">🌀 Zoom whoosh</option><option value="zoomflash">🌀⚡ Zoom + flash</option>
+              <option value="shake">📳 Shake</option><option value="black">⬛ Dip to black</option>
+            </select>
+            <label>Duration <input id="trdur" type="range" min="0.1" max="1.2" step="0.05" value="0.4"> <span id="trdurv" class="v"></span></label>
+            <label>Sound <select id="trsnd"></select></label>
+            <label>Volume <input id="trvol" type="range" min="0" max="2" step="0.05" value="1"></label>
+            <span id="trnote" class="hint"></span>
+          </div>
+        </div>
+
+        <div class="ig col" id="i-text" hidden>
+          <div class="ig">
+            <b>Text</b>
+            <textarea id="ttext" rows="2" placeholder="Type your text…"></textarea>
+            <label>Font <select id="tfont"></select></label>
+            <span class="btnrow"><label class="btn sm">＋ Upload font<input id="up-font" type="file" accept=".ttf,.otf,.woff,.woff2" hidden></label>
+            <button id="tfdel" hidden>Delete this font</button></span>
+          </div>
+          <div class="ig">
+            <b>Style</b>
+            <span class="btnrow">
+              <button id="tb" class="tog" title="Bold"><b>B</b></button><button id="ti" class="tog" title="Italic"><i>I</i></button><button id="tu" class="tog" title="Underline"><u>U</u></button>
+              <button id="toutl" class="tog" title="Black outline">Outline</button>
+              <span class="seg"><button data-al="left" class="tog" title="Align left">⯇</button><button data-al="center" class="tog" title="Align center">≡</button><button data-al="right" class="tog" title="Align right">⯈</button></span>
+            </span>
+            <label>Size <input id="tsize" type="range" min="2" max="30" step="0.5"> <span id="tsizev" class="v"></span></label>
+            <label>Opacity <input id="topac" type="range" min="0" max="100" step="1" value="100"> <span id="topacv" class="v"></span></label>
+            <div class="swrow"><span id="tcolors"></span><input id="tcolor" type="color" class="swc" title="Custom color"></div>
+          </div>
+          <div class="ig">
+            <b>Position</b>
+            <label>X <input id="tpx" type="range" min="0" max="100" step="0.5"> <span id="tpxv" class="v"></span></label>
+            <label>Y <input id="tpy" type="range" min="0" max="100" step="0.5"> <span id="tpyv" class="v"></span></label>
+            <span class="btnrow"><button id="tcx" title="Horizontal center">⇔ Center X</button><button id="tcy" title="Vertical center">⇕ Center Y</button></span>
+          </div>
+          <div class="ig">
+            <b>Scroll</b>
+            <span class="btnrow seg5"><button id="tscr0" class="tog" title="No scrolling">Off</button><button id="tscrL" class="tog" title="Moves from right to left">⯇ Left</button><button id="tscrR" class="tog" title="Moves from left to right">Right ⯈</button><button id="tscrU" class="tog" title="Moves from bottom to top">⯅ Up</button><button id="tscrD" class="tog" title="Moves from top to bottom">Down ⯆</button></span>
+            <label>Speed <input id="tspd" type="range" min="2" max="150" step="1" value="20"> <span id="tspdv" class="v"></span></label>
+            <span class="hint">With scroll on, X / Y is the starting point (X for Left/Right, Y for Up/Down). You can also drag it in the preview.</span>
+          </div>
+          <div class="ig">
+            <b>Timing</b>
+            <div class="two">
+              <label>Start (s) <input id="tstart" type="number" min="0" step="0.1"></label>
+              <label>Duration (s) <input id="tdur" type="number" min="0.2" step="0.1"></label>
+            </div>
+            <span class="btnrow"><button id="twhole" title="Show the text for the whole video (0s → end)">Whole video</button><button id="tfit" title="Text ends where the video ends">⇥ Video end</button><button id="tend" title="Text ends at the playhead">⇥ Playhead</button></span>
+          </div>
+          <div class="ig actions"><button id="tdup">Duplicate</button><button id="tdel" class="danger">Delete text</button></div>
+        </div>
+
+        <div class="ig col" id="i-img" hidden>
+          <div class="ig">
+            <b>Image: <span id="iname"></span></b>
+            <label>Opacity <input id="iop" type="range" min="0" max="100" step="1" value="100"> <span id="iopv" class="v"></span></label>
+            <label>Size <input id="isize" type="range" min="3" max="200" step="1" value="40"> <span id="isizev" class="v"></span></label>
+            <label title="Round the corners of the image">Corner radius <input id="irad" type="range" min="0" max="50" step="1" value="0"> <span id="iradv" class="v"></span></label>
+          </div>
+          <div class="ig">
+            <b>Position</b>
+            <label>X <input id="ipx" type="range" min="0" max="100" step="0.5"> <span id="ipxv" class="v"></span></label>
+            <label>Y <input id="ipy" type="range" min="0" max="100" step="0.5"> <span id="ipyv" class="v"></span></label>
+            <span class="btnrow"><button id="icx" title="Horizontal center">⇔ Center X</button><button id="icy" title="Vertical center">⇕ Center Y</button></span>
+          </div>
+          <div class="ig">
+            <b>Scroll</b>
+            <span class="btnrow seg5"><button id="iscr0" class="tog" title="No scrolling">Off</button><button id="iscrL" class="tog" title="Moves from right to left">⯇ Left</button><button id="iscrR" class="tog" title="Moves from left to right">Right ⯈</button><button id="iscrU" class="tog" title="Moves from bottom to top">⯅ Up</button><button id="iscrD" class="tog" title="Moves from top to bottom">Down ⯆</button></span>
+            <label>Speed <input id="ispd" type="range" min="2" max="150" step="1" value="20"> <span id="ispdv" class="v"></span></label>
+            <span class="hint" id="iscrnote"></span>
+          </div>
+          <div class="ig">
+            <b>Timing</b>
+            <div class="two">
+              <label>Start (s) <input id="istart" type="number" min="0" step="0.1"></label>
+              <label>Duration (s) <input id="idur" type="number" min="0.2" step="0.1"></label>
+            </div>
+            <span class="btnrow"><button id="iwhole" title="Show the image for the whole video (0s → end)">Whole video</button><button id="ifit" title="Image ends where the video ends">⇥ Video end</button><button id="iend" title="Image ends at the playhead">⇥ Playhead</button></span>
+          </div>
+          <div class="ig actions"><button id="idup">Duplicate</button><button id="iungrp" hidden>Ungroup</button><button id="idel" class="danger">Delete image</button></div>
+        </div>
+
+        <div class="ig col" id="i-sfx" hidden>
+          <div class="ig">
+            <b>SFX: <span id="sname"></span></b>
+            <label>Volume <input id="svol" type="range" min="0" max="2" step="0.05" value="1"> <span id="svolv" class="v"></span></label>
+            <label>Time (s) <input id="stime" type="number" min="0" step="0.05" style="width:80px"></label>
+          </div>
+          <div class="ig actions"><button id="sdel" class="danger">Delete SFX</button></div>
+        </div>
+        <div class="ig col" id="i-music" hidden>
+          <div class="ig">
+            <b>Music: <span id="mname"></span></b>
+            <label>Volume <input id="mvol" type="range" min="0" max="1.5" step="0.05" value="0.3"> <span id="mvolv" class="v"></span></label>
+            <label>Fade-out (s) <input id="mfade" type="range" min="0" max="8" step="0.5" value="1.5"> <span id="mfadev" class="v"></span></label>
+          </div>
+          <div class="ig actions"><button id="mdel" class="danger">Remove music</button></div>
+        </div>
+        <div class="ig col" id="i-fx" hidden>
+          <div class="ig">
+            <b>Effect: <span id="fname"></span></b>
+            <label title="1% – 150% (vintage / dust max out at 100%, grain / glitch go up to 150%)">Intensity <input id="famt" type="range" min="0.01" max="1.5" step="0.01" value="0.6"> <input id="famtn" type="number" min="1" max="150" step="1" style="width:62px"> %</label>
+          </div>
+          <div class="ig">
+            <b>Timing</b>
+            <div class="two">
+              <label>Start (s) <input id="fstart" type="number" min="0" step="0.1"></label>
+              <label>Duration (s) <input id="fdur" type="number" min="0.1" step="0.1"></label>
+            </div>
+            <span class="btnrow"><button id="ffull" title="Whole video">Whole video</button><button id="fend" title="End = end of the video">⇥ Video end</button></span>
+          </div>
+          <div class="ig actions"><button id="fdup">Duplicate</button><button id="fdel" class="danger">Delete effect</button></div>
+        </div>
+      </div>
+      <div id="sideempty"><div class="ico">☝</div><b>Nothing selected</b><p>Click a clip, text, image, effect or sound on the timeline or in the preview to edit its properties here.</p></div>
+    </div>
+  </aside>
+
+  <!-- ===== bottom: toolbar + timeline ===== -->
+  <div id="bottom">
+    <div class="bar" id="pbar">
+      <div class="tgrp">
+        <button id="play" class="primary" title="Play / pause (Space)">▶ Play</button>
+        <button id="split" title="Split at the playhead (S)">✂ Split</button>
+        <button id="del" title="Delete the selected item (Delete)">🗑 Delete</button>
+        <span class="sep"></span>
+        <button id="undo" title="Undo">↶</button><button id="redo" title="Redo">↷</button>
+      </div>
+      <div class="tgrp">
+        <button id="linkbtn" class="tog on" title="Linked: the main item cannot be deleted (all other items stay safe). Unlink to delete only the main item — text / image / FX / SFX / music stay as they are and the duration is kept">🔗 Linked</button>
+        <label class="btn" id="replbtn" title="Replace the main video / image — everything else stays">🔁 Replace main<input id="replfile" type="file" accept="video/*,image/*" hidden></label>
+        <button id="mutebtn" class="tog" title="Mute / unmute the main video's sound (preview + export)">🔊 Main sound</button>
+        <button id="extractbtn" title="Extract the main video's audio into the Music library">🎵 Extract audio</button>
+      </div>
+      <span id="time">0:00.0 / 0:00.0</span>
+      <div class="tgrp">
+        <button id="snapbtn" class="tog" title="Magnetic snap: timeline items + seek bar (hold Alt to turn it off temporarily)">🧲 Snap</button>
+        <button id="gridbtn" class="tog" title="Grid lines (thirds + center)">▦ Grid</button>
+        <label class="zoomw" title="Timeline zoom">🔍 <input id="tzoom" type="range" min="10" max="200" value="40"></label>
+      </div>
+    </div>
+    <div id="tl"><div id="track">
+      <div class="lane" style="top:4px;height:62px"></div>
+      <div class="lane" style="top:68px;height:34px"><span>SFX</span></div>
+      <div class="lane" style="top:104px;height:34px"><span>Music</span></div>
+      <div class="lane" id="txlane" style="top:142px;height:34px"><span>Text</span></div>
+      <div class="lane" id="imlane" style="top:178px;height:34px"><span>Image</span></div>
+      <div class="lane" id="fxlane" style="top:178px;height:34px"><span>FX</span></div>
+      <div id="dropline" hidden></div>
+      <div id="head"></div>
+    </div></div>
+  </div>
 </div>
-<div class="bar insp" id="cropbar" hidden>
-  <b>Crop</b>
-  <span id="ratios">
-    <button data-r="free" class="on">Free</button><button data-r="orig">Original</button>
-    <button data-r="9:16">9:16</button><button data-r="16:9">16:9</button><button data-r="1:1">1:1</button>
-    <button data-r="4:5">4:5</button><button data-r="3:4">3:4</button><button data-r="4:3">4:3</button>
-  </span>
-  <label>Size <input id="csize" type="range" min="8" max="100" step="1" value="100"></label>
-  <span id="cinfo" class="hint"></span>
-  <label><input type="checkbox" id="call"> හැම clip එකටම</label>
-  <button id="cfull">Reset</button>
-  <button id="capply" class="ok">✔ Apply (Enter)</button>
-  <button id="ccancel">✕ Cancel (Esc)</button>
-</div>
-<div class="bar insp" id="insp" hidden>
-  <div class="ig col" id="i-clip" hidden>
-    <div class="ig">
-      <b>Clip</b>
-      <label title="Clip එකේ දිග (තත්පර) — image එකක් නම් 300s (5min) දක්වා දිග කරන්න පුළුවන්">Duration <input id="cdur" type="number" min="0.2" step="0.1" style="width:64px"> s</label>
-      <label>Speed <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1"> <span id="speedv" class="v">1x</span></label>
-      <span><button data-sp="1">1x</button> <button data-sp="2">2x</button> <button data-sp="4">4x</button> <button data-sp="8">8x</button></span>
-      <label>Zoom <input id="czoom" type="range" min="1" max="3" step="0.05" value="1"> <span id="czoomv" class="v">1.00x</span></label>
-      <label>X <input id="zx" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-      <label>Y <input id="zy" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-      <button id="zreset">Zoom අයින් කරන්න</button>
-      <button id="cropbtn" title="Crop (C)">⛶ Crop</button>
-      <button id="croprm" hidden>Crop අයින් කරන්න</button>
-      <label title="Video (crop කළ කොටසේ) කොන් round කරන්න — preview + export දෙකටම">Corner radius <input id="crad" type="range" min="0" max="50" step="1" value="0"> <span id="cradv" class="v"></span></label>
-      <button id="cradall" title="මේ radius එක හැම clip එකටම">හැම clip එකටම</button>
-    </div>
-    <div class="ig">
-      <b>Transition (clip එකේ මුල)</b>
-      <select id="trtype">
-        <option value="none">None (cut)</option><option value="flash">⚡ Flash</option>
-        <option value="zoom">🌀 Zoom whoosh</option><option value="zoomflash">🌀⚡ Zoom + flash</option>
-        <option value="shake">📳 Shake</option><option value="black">⬛ Dip black</option>
-      </select>
-      <label>Duration <input id="trdur" type="range" min="0.1" max="1.2" step="0.05" value="0.4"> <span id="trdurv" class="v"></span></label>
-      <label>Sound <select id="trsnd"></select></label>
-      <label>Vol <input id="trvol" type="range" min="0" max="2" step="0.05" value="1"></label>
-      <span id="trnote" class="hint"></span>
-    </div>
-  </div>
-  <div class="ig col" id="i-text" hidden>
-    <div class="ig">
-      <b>Text</b>
-      <textarea id="ttext" rows="2" placeholder="Text ලියන්න… (සිංහල / English)"></textarea>
-      <label>Font <select id="tfont"></select></label>
-      <label class="btn sm">+ Upload font<input id="up-font" type="file" accept=".ttf,.otf,.woff,.woff2" hidden></label>
-      <button id="tfdel" hidden>Delete this font</button>
-    </div>
-    <div class="ig">
-      <button id="tb" class="tog" title="Bold"><b>B</b></button><button id="ti" class="tog" title="Italic"><i>I</i></button><button id="tu" class="tog" title="Underline"><u>U</u></button>
-      <button id="toutl" class="tog" title="කළු outline">Outline</button>
-      <span><button data-al="left" class="tog" title="Left">⯇</button><button data-al="center" class="tog" title="Center">≡</button><button data-al="right" class="tog" title="Right">⯈</button></span>
-      <label>Size <input id="tsize" type="range" min="2" max="30" step="0.5"> <span id="tsizev" class="v"></span></label>
-      <label>Opacity <input id="topac" type="range" min="0" max="100" step="1" value="100"> <span id="topacv" class="v"></span></label>
-    </div>
-    <div class="ig">
-      <span id="tcolors"></span>
-      <input id="tcolor" type="color" class="swc" title="Custom color">
-      <label>Start (s) <input id="tstart" type="number" min="0" step="0.1" style="width:70px"></label>
-      <label>Duration (s) <input id="tdur" type="number" min="0.2" step="0.1" style="width:70px"></label>
-      <button id="twhole" title="Text එක මුළු video එකටම (0s → video end)">Whole video</button><button id="tfit" title="Text එකේ අග = video එකේ අග">⇥ Video end</button><button id="tend" title="Text එකේ අග = playhead">⇥ Playhead</button>
-      <button id="tcx" title="Horizontal center">⇔ Center X</button><button id="tcy" title="Vertical center">⇕ Center Y</button>
-      <button id="tdup">Duplicate</button><button id="tdel">Delete text</button>
-    </div>
-    <div class="ig">
-      <b>Position</b>
-      <label>X <input id="tpx" type="range" min="0" max="100" step="0.5"> <span id="tpxv" class="v"></span></label>
-      <label>Y <input id="tpy" type="range" min="0" max="100" step="0.5"> <span id="tpyv" class="v"></span></label>
-      <b>Scroll</b>
-      <span><button id="tscr0" class="tog" title="Scroll නෑ">Off</button><button id="tscrL" class="tog" title="දකුණේ ඉඳන් වමට යනවා">⯇ Left</button><button id="tscrR" class="tog" title="වමේ ඉඳන් දකුණට යනවා">Right ⯈</button><button id="tscrU" class="tog" title="පහළින් උඩට යනවා">⯅ Up</button><button id="tscrD" class="tog" title="උඩින් පහළට යනවා">Down ⯆</button></span>
-      <label>Speed <input id="tspd" type="range" min="2" max="150" step="1" value="20"> <span id="tspdv" class="v"></span></label>
-      <span class="hint">Scroll on නම් X / Y = පටන් ගන්න තැන (Left/Right → X, Up/Down → Y) · preview එකේ mouse එකෙන් drag කරලා ඕනෑම තැනකට ගන්න පුළුවන්</span>
-    </div>
-  </div>
-  <div class="ig col" id="i-img" hidden>
-    <div class="ig">
-      <b>Image: <span id="iname"></span></b>
-      <label>Opacity <input id="iop" type="range" min="0" max="100" step="1" value="100"> <span id="iopv" class="v"></span></label>
-      <label>Size <input id="isize" type="range" min="3" max="200" step="1" value="40"> <span id="isizev" class="v"></span></label>
-      <label title="Image එකේ කොන් round කරන්න">Corner radius <input id="irad" type="range" min="0" max="50" step="1" value="0"> <span id="iradv" class="v"></span></label>
-    </div>
-    <div class="ig">
-      <b>Position</b>
-      <label>X <input id="ipx" type="range" min="0" max="100" step="0.5"> <span id="ipxv" class="v"></span></label>
-      <label>Y <input id="ipy" type="range" min="0" max="100" step="0.5"> <span id="ipyv" class="v"></span></label>
-      <b>Scroll</b>
-      <span><button id="iscr0" class="tog" title="Scroll නෑ">Off</button><button id="iscrL" class="tog" title="දකුණේ ඉඳන් වමට යනවා">⯇ Left</button><button id="iscrR" class="tog" title="වමේ ඉඳන් දකුණට යනවා">Right ⯈</button><button id="iscrU" class="tog" title="පහළින් උඩට යනවා">⯅ Up</button><button id="iscrD" class="tog" title="උඩින් පහළට යනවා">Down ⯆</button></span>
-      <label>Speed <input id="ispd" type="range" min="2" max="150" step="1" value="20"> <span id="ispdv" class="v"></span></label>
-      <span class="hint" id="iscrnote"></span>
-    </div>
-    <div class="ig">
-      <label>Start (s) <input id="istart" type="number" min="0" step="0.1" style="width:70px"></label>
-      <label>Duration (s) <input id="idur" type="number" min="0.2" step="0.1" style="width:70px"></label>
-      <button id="iwhole" title="Image එක මුළු video එකටම (0s → video end)">Whole video</button><button id="ifit" title="Image එකේ අග = video එකේ අග">⇥ Video end</button><button id="iend" title="Image එකේ අග = playhead">⇥ Playhead</button>
-      <button id="icx" title="Horizontal center">⇔ Center X</button><button id="icy" title="Vertical center">⇕ Center Y</button>
-      <button id="idup">Duplicate</button><button id="iungrp" hidden>Ungroup</button><button id="idel">Delete image</button>
-    </div>
-  </div>
-  <div class="ig" id="i-sfx" hidden>
-    <b>SFX: <span id="sname"></span></b>
-    <label>Volume <input id="svol" type="range" min="0" max="2" step="0.05" value="1"> <span id="svolv" class="v"></span></label>
-    <label>Time (s) <input id="stime" type="number" min="0" step="0.05" style="width:80px"></label>
-    <button id="sdel">Delete SFX</button>
-  </div>
-  <div class="ig" id="i-music" hidden>
-    <b>Music: <span id="mname"></span></b>
-    <label>Volume <input id="mvol" type="range" min="0" max="1.5" step="0.05" value="0.3"> <span id="mvolv" class="v"></span></label>
-    <label>Fade-out (s) <input id="mfade" type="range" min="0" max="8" step="0.5" value="1.5"> <span id="mfadev" class="v"></span></label>
-    <button id="mdel">Music අයින් කරන්න</button>
-  </div>
-  <div class="ig" id="i-fx" hidden>
-    <b>Effect: <span id="fname"></span></b>
-    <label title="1% – 150% (vintage / dust වල opacity උපරිමය 100%, grain / glitch 150% දක්වා තව තද වෙනවා)">Intensity <input id="famt" type="range" min="0.01" max="1.5" step="0.01" value="0.6"> <input id="famtn" type="number" min="1" max="150" step="1" style="width:62px"> %</label>
-    <label>Start (s) <input id="fstart" type="number" min="0" step="0.1" style="width:70px"></label>
-    <label>Duration (s) <input id="fdur" type="number" min="0.1" step="0.1" style="width:70px"></label>
-    <button id="ffull" title="මුළු video එකටම">Whole video</button><button id="fend" title="අග = video එකේ අග">⇥ Video end</button>
-    <button id="fdup">Duplicate</button><button id="fdel">Delete effect</button>
-  </div>
-</div>
-<div id="tl"><div id="track">
-  <div class="lane" style="top:4px;height:62px"></div>
-  <div class="lane" style="top:68px;height:34px"><span>SFX</span></div>
-  <div class="lane" style="top:104px;height:34px"><span>Music</span></div>
-  <div class="lane" id="txlane" style="top:142px;height:34px"><span>Text</span></div>
-  <div class="lane" id="imlane" style="top:178px;height:34px"><span>Image</span></div>
-  <div class="lane" id="fxlane" style="top:178px;height:34px"><span>FX</span></div>
-  <div id="dropline" hidden></div>
-  <div id="head"></div>
-</div></div>
-</div></div>
 <div id="toast"></div>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

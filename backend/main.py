@@ -141,7 +141,7 @@ async def create(bg: BackgroundTasks, file: UploadFile = File(...)):
         vid = d / "original.mp4"
         if not image_to_video(src, vid):
             shutil.rmtree(d, ignore_errors=True)
-            raise HTTPException(400, "මේ image එක read කරන්න බෑ (png/jpg/webp try කරන්න)")
+            raise HTTPException(400, "This image cannot be read (try png/jpg/webp)")
         src.unlink(missing_ok=True)
         src = vid
         extra = {"is_image": True, "default_len": IMG_PROJECT_DEFAULT}
@@ -158,7 +158,7 @@ async def replace_main(pid: str, bg: BackgroundTasks, file: UploadFile = File(..
     frontend එක clips විතරක් අලුත් source එකට reset කරනවා."""
     d = pdir(pid)
     if JOBS.get(pid, {}).get("status") in ("queued", "running"):
-        raise HTTPException(409, "export වෙමින් පවතී")
+        raise HTTPException(409, "An export is in progress")
     ext = Path(file.filename or "v.mp4").suffix.lower() or ".mp4"
     is_img = ext in PROJ_IMG_EXT or (file.content_type or "").startswith("image/")
     tag = uuid.uuid4().hex[:6]
@@ -172,14 +172,14 @@ async def replace_main(pid: str, bg: BackgroundTasks, file: UploadFile = File(..
         if not image_to_video(raw, vid):
             raw.unlink(missing_ok=True)
             vid.unlink(missing_ok=True)
-            raise HTTPException(400, "මේ image එක read කරන්න බෑ (png/jpg/webp try කරන්න)")
+            raise HTTPException(400, "This image cannot be read (try png/jpg/webp)")
         raw.unlink(missing_ok=True)
         raw = vid
         extra = {"is_image": True, "default_len": IMG_PROJECT_DEFAULT}
     pr = probe(raw)
     if not pr["width"] or not pr["height"]:
         raw.unlink(missing_ok=True)
-        raise HTTPException(400, "මේ file එක video/image එකක් විදියට read කරන්න බෑ")
+        raise HTTPException(400, "This file cannot be read as a video / image")
     with META_LOCK:
         m = read_meta(d)
         old = d / m.get("original", "")
@@ -204,7 +204,7 @@ def extract_audio(pid: str):
     m = read_meta(d)
     src = d / m["original"]
     if not probe(src)["has_audio"]:
-        raise HTTPException(400, "මේ video එකේ audio නෑ")
+        raise HTTPException(400, "This video has no audio")
     aid = uuid.uuid4().hex[:10]
     out = ASSETS / f"{aid}.mp3"
     with ffmpeg_lock:
@@ -215,7 +215,7 @@ def extract_audio(pid: str):
             r = None
     if r is None or r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
         out.unlink(missing_ok=True)
-        raise HTTPException(500, "audio extract කරන්න බැරි වුණා")
+        raise HTTPException(500, "Audio extraction failed")
     base = Path(m.get("source_name") or m.get("name") or "video").stem[:48]
     a = {"id": aid, "name": f"{base} (audio)", "kind": "music", "ext": ".mp3", "duration": probe(out)["duration"]}
     (ASSETS / f"{aid}.json").write_text(json.dumps(a))
@@ -266,7 +266,7 @@ async def rename_project(pid: str, request: Request):
     d = pdir(pid)
     name = str((await request.json()).get("name", "")).strip()[:100]
     if not name:
-        raise HTTPException(400, "name හිස්")
+        raise HTTPException(400, "The name is empty")
     with META_LOCK:
         m = read_meta(d)
         m["name"] = name
@@ -278,7 +278,7 @@ async def rename_project(pid: str, request: Request):
 def delete_project(pid: str):
     d = pdir(pid)
     if JOBS.get(pid, {}).get("status") in ("queued", "running"):
-        raise HTTPException(409, "export වෙමින් පවතී")
+        raise HTTPException(409, "An export is in progress")
     shutil.rmtree(d, ignore_errors=True)
     JOBS.pop(pid, None)
     return {"ok": True}
@@ -476,7 +476,7 @@ def emoji_install_job():
             items.append({"u": stem, "n": (d.get("name") or d["short_name"]).lower(), "c": c,
                           "k": " ".join(d.get("short_names") or [])})
         if not items:
-            raise RuntimeError("emoji එකක්වත් download වුනේ නෑ (internet / jsDelivr)")
+            raise RuntimeError("No emoji could be downloaded (internet / jsDelivr)")
         (EMOJI / "index.json").write_text(json.dumps({"cats": cats, "items": items}, ensure_ascii=False), encoding="utf-8")
         J["status"] = "done"
     except Exception as e:   # noqa
@@ -531,9 +531,9 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
     ext = Path(file.filename or "").suffix.lower()
     if kind == "image":
         if ext not in IMG_IN:
-            raise HTTPException(400, "image file විතරයි (png/jpg/webp/gif/bmp/tiff)")
+            raise HTTPException(400, "Only image files are allowed (png/jpg/webp/gif/bmp/tiff)")
     elif ext not in AUDIO_EXT:
-        raise HTTPException(400, "audio file විතරයි (mp3/wav/ogg/m4a/aac/flac)")
+        raise HTTPException(400, "Only audio files are allowed (mp3/wav/ogg/m4a/aac/flac)")
     aid = uuid.uuid4().hex[:10]
     path = ASSETS / (f"{aid}_raw{ext}" if kind == "image" else f"{aid}{ext}")   # image: raw -> PNG convert (same name clash නොවෙන්න)
     size = 0
@@ -543,7 +543,7 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
             if kind == "image" and size > 25 << 20:
                 f.close()
                 path.unlink(missing_ok=True)
-                raise HTTPException(400, "image ලොකු වැඩියි (25MB max)")
+                raise HTTPException(400, "The image is too large (25MB max)")
             f.write(chunk)
     if kind == "image":
         # ඕනෑම image format එකක් -> PNG (frame 1, EXIF rotate සහිතව, උපරිම 2048px) : preview + export දෙකටම එකම file එක
@@ -558,7 +558,7 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
             path.unlink(missing_ok=True)
         if r is None or r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
             out.unlink(missing_ok=True)
-            raise HTTPException(400, "මේ image එක read කරන්න බෑ (png/jpg/webp try කරන්න)")
+            raise HTTPException(400, "This image cannot be read (try png/jpg/webp)")
         path, ext = out, ".png"
     pr = probe(path)
     m = {"id": aid, "name": Path(file.filename).stem[:60], "kind": kind if kind in ("sfx", "music", "image") else "sfx",
@@ -609,7 +609,7 @@ def list_fonts():
 async def upload_font(file: UploadFile = File(...)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in FONT_EXT:
-        raise HTTPException(400, "font file විතරයි (ttf/otf/woff/woff2)")
+        raise HTTPException(400, "Only font files are allowed (ttf/otf/woff/woff2)")
     fid = uuid.uuid4().hex[:10]
     path = FONTS / f"{fid}{ext}"
     size = 0
@@ -619,7 +619,7 @@ async def upload_font(file: UploadFile = File(...)):
             if size > 30 << 20:
                 f.close()
                 path.unlink(missing_ok=True)
-                raise HTTPException(400, "font file ලොකු වැඩියි (30MB max)")
+                raise HTTPException(400, "The font file is too large (30MB max)")
             f.write(chunk)
     m = {"id": fid, "name": Path(file.filename).stem[:60], "ext": ext}
     (FONTS / f"{fid}.json").write_text(json.dumps(m))
@@ -1095,7 +1095,7 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
             info = probe(src)
             ow, oh = info["width"], info["height"]
             if not ow or not oh:
-                raise RuntimeError("video size read කරන්න බෑ")
+                raise RuntimeError("Cannot read the video size")
             sw0, sh0 = ow, oh
             ow, oh = canvas_dims(canvas, clips, sw0, sh0)
             if width:
