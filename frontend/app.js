@@ -658,7 +658,9 @@ $('#cdur').onchange = e => {   // clip duration (තත්පර) type කරල
   const c = clips[sel]; if (!c) return;
   snap('Clip duration');
   const want = Math.max(0.2, +e.target.value || 1);
-  c.end = +Math.min(meta?.duration || (c.start + want * sp(c)), c.start + want * sp(c)).toFixed(2);
+  const lim = meta?.duration || (c.start + want * sp(c)), wantEnd = c.start + want * sp(c);
+  c.end = +Math.min(lim, wantEnd).toFixed(2);
+  if (wantEnd > lim + 0.01) toast(`Source එකේ දිග ${lim.toFixed(1)}s විතරයි — ඊට වඩා දිග කරන්න බෑ`);
   changed();
 };
 bind('#speed', () => clips[sel], 'speed', 'Clip speed'); bind('#czoom', () => clips[sel], 'zoom', 'Clip zoom');
@@ -774,7 +776,7 @@ $('#export').onclick = async () => {
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
-  const body = { clips, sfx, music, canvas, width: +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs };
+  const body = { clips, sfx, music, canvas, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs };
   const r = await fetch(`/api/projects/${pid}/export`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { $('#xstat').textContent = 'Export error: ' + (await r.text()).slice(0, 120); return; }
@@ -849,7 +851,7 @@ async function openProject(id) {
   imgs = (ed.imgs || []).map(normI);
   // අන්තිමට තිබ්බ settings ආපහු
   pps = ui.pps || 40; $('#tzoom').value = pps;
-  $('#xres').value = ui.res ?? '0'; $('#xpreset').value = ui.preset || 'veryfast';
+  $('#xres').value = ui.res ?? 'hd'; $('#xpreset').value = ui.preset || 'veryfast';
   dirty = false; exitCrop(); undo = []; redo = []; updUndoUi(); clearSel(); cur = 0; head = 0; zkey = '';
   video.src = `/api/projects/${id}/proxy.mp4`;
   video.onloadedmetadata = () => { render(); seek(Math.min(+ui.head || 0, total())); };
@@ -1188,7 +1190,8 @@ function outWidth() {
   if (canvas === 'auto') { const cr = clips[0]?.crop; cw = cr ? Math.max(2, Math.round(cr.w * sw)) : sw; }
   else if (canvas === 'orig') cw = sw;
   else { const [a, b] = canvas.split(':').map(Number), rt = a / b; cw = rt > sw / sh ? sw : Math.round(sh * rt); }
-  let w = +$('#xres').value || cw; return w - (w % 2);
+  const rv = $('#xres').value;
+  let w = rv === 'hd' ? Math.max(cw, 1080) : (+rv || cw); return w - (w % 2);
 }
 async function renderTextPng(t, W) {
   const px = t.size * W;

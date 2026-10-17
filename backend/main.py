@@ -1,4 +1,4 @@
-import base64, json, os, re, shutil, subprocess, threading, time, uuid
+import base64, json, os, re, shutil, struct, subprocess, threading, time, uuid
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse
@@ -237,15 +237,72 @@ async def put_ui(pid: str, request: Request):
     b = await request.json()
     b = b if isinstance(b, dict) else {}
     ui = {"head": clamp(b.get("head"), 0, 36000, 0), "pps": clamp(b.get("pps"), 10, 200, 40),
-          "res": str(b.get("res")) if str(b.get("res")) in ("0", "720", "1080") else "0",
+          "res": str(b.get("res")) if str(b.get("res")) in ("0", "720", "1080", "1440", "2160", "hd") else "hd",
           "preset": b.get("preset") if b.get("preset") in ("veryfast", "medium") else "veryfast"}
     (pdir(pid) / "ui.json").write_text(json.dumps(ui))
     return {"ok": True}
 
 
+def migrate_image_project(pid: str):
+    """පරණ image project (තත්පර 0.04ක source එකක්) -> දිග still video එකක් (timeline එකේ දිග කරන්න පුළුවන්)"""
+    d = DATA / pid
+    ok = False
+    try:
+        m = read_meta(d)
+        orig = d / m["original"]
+        img = orig
+        if orig.suffix.lower() not in PROJ_IMG_EXT:   # video එකක් නම් පළමු frame එක ගන්නවා
+            img = d / "frame0.png"
+            subprocess.run([FFMPEG, "-y", "-i", str(orig), "-frames:v", "1", str(img)], capture_output=True)
+        out = d / "original_long.mp4"
+        if img.exists() and image_to_video(img, out):
+            for x in (d / "proxy.mp4", d / "thumb.jpg"):
+                x.unlink(missing_ok=True)
+            if orig != out:
+                orig.unlink(missing_ok=True)
+            final = d / "original.mp4"
+            out.replace(final)
+            with META_LOCK:
+                m = read_meta(d)
+                m.update({"original": final.name, "is_image": True, "default_len": IMG_PROJECT_DEFAULT, **probe(final)})
+                write_meta(d, m)
+            # edit.json එකේ තත්පර 0.04ක clip එක -> default දිගට
+            ep = d / "edit.json"
+            if ep.exists():
+                try:
+                    ed = json.loads(ep.read_text())
+                    cl = ed.get("clips") or []
+                    if len(cl) == 1 and float(cl[0].get("end", 0)) - float(cl[0].get("start", 0)) < 0.5:
+                        cl[0]["start"], cl[0]["end"] = 0, IMG_PROJECT_DEFAULT
+                        ep.write_text(json.dumps(ed))
+                except (ValueError, TypeError):
+                    pass
+            ok = True
+    except (OSError, ValueError, KeyError) as e:
+        print("migrate error:", e)
+    if ok:
+        make_proxy(pid)
+    else:
+        with META_LOCK:
+            try:
+                m = read_meta(d); m["status"] = "ready"; m["migrate_failed"] = True; write_meta(d, m)
+            except (OSError, ValueError):
+                pass
+
+
 @app.get("/api/projects/{pid}")
 def get_project(pid: str):
-    return read_meta(pdir(pid))
+    d = pdir(pid)
+    m = read_meta(d)
+    # පරණ image project (fix එකට කලින් හදපු) -> auto upgrade
+    if (m.get("status") == "ready" and not m.get("is_image") and not m.get("migrate_failed")
+            and (m.get("duration") or 0) < 1
+            and (Path(m.get("original", "")).suffix.lower() in PROJ_IMG_EXT
+                 or Path(m.get("name") or "").suffix.lower() in PROJ_IMG_EXT)):
+        with META_LOCK:
+            m["status"] = "processing"; write_meta(d, m)
+        threading.Thread(target=migrate_image_project, args=(pid,), daemon=True).start()
+    return m
 
 
 @app.get("/api/projects/{pid}/proxy.mp4")
@@ -532,7 +589,8 @@ def sanitize_texts(raw, d: Path):
         path = d / f"txt_{k}.png"
         path.write_bytes(data)
         s0 = clamp(t.get("start"), 0, 36000, 0)
-        out.append({"path": path, "wf": clamp(t.get("wf"), 0.001, 4, 0.3),
+        out.append({"path": path, "pw": struct.unpack(">I", data[16:20])[0] if len(data) > 24 else 0,
+                    "wf": clamp(t.get("wf"), 0.001, 4, 0.3),
                     "x": clamp(t.get("x"), 0, 1, 0.5), "y": clamp(t.get("y"), 0, 1, 0.5),
                     "op": clamp(t.get("op"), 0, 1, 1),
                     "start": s0, "end": max(s0 + 0.05, clamp(t.get("end"), 0, 36000, s0 + 3))})
@@ -716,6 +774,9 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     if fxs:   # FX: concat එකට පස්සේ, text වලට යටින්
         fg, vlabel = build_fx("[v]", fxs, ow, oh, total)
         chains.append(fg)
+    if texts or imgs:   # overlay සියල්ල 4:4:4 වලින් (chroma blur නැතුව), අන්තිමට එක පාරක් විතරක් 4:2:0
+        chains.append(f"{vlabel}format=yuv444p[v444]")
+        vlabel = "[v444]"
     for k, im in enumerate(imgs or []):   # image overlays: FX වලට උඩින්, text වලට යටින්
         w = max(2, round(im["w"] * ow))
         opa = f",colorchannelmixer=aa={im['op']:.3f}" if im["op"] < 0.999 else ""
@@ -725,8 +786,12 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
         vlabel = f"[vi{k}]"
     for k, t in enumerate(texts or []):   # text layers: concat එකට පස්සේ overlay (flash/transition වලට උඩින්)
         w = max(2, round(t["wf"] * ow))
-        opa = f",colorchannelmixer=aa={t['op']:.3f}" if t.get("op", 1) < 0.999 else ""
-        chains.append(f"[{tbase + k}:v]format=rgba,scale={w}:-1:flags=lanczos{opa}[tx{k}]")
+        fl = ["format=rgba"]
+        if abs(w - (t.get("pw") or 0)) > 1:   # size එක ගැලපෙනවා නම් resample නෑ (1:1 pixels = තියුණුම)
+            fl.append(f"scale={w}:-1:flags=lanczos")
+        if t.get("op", 1) < 0.999:
+            fl.append(f"colorchannelmixer=aa={t['op']:.3f}")
+        chains.append(f"[{tbase + k}:v]" + ",".join(fl) + f"[tx{k}]")
         chains.append(f"{vlabel}[tx{k}]overlay=x=main_w*{t['x']:.5f}-overlay_w/2:y=main_h*{t['y']:.5f}-overlay_h/2"
                       f":enable='between(t,{t['start']:.3f},{t['end']:.3f})':format=auto[vt{k}]")
         vlabel = f"[vt{k}]"
@@ -778,7 +843,8 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
             cmd += ["-filter_complex", graph, "-map", vlabel]
             if label:
                 cmd += ["-map", label, "-c:a", "aac", "-b:a", "192k"]
-            cmd += ["-c:v", "libx264", "-preset", preset, "-crf", "16", "-t", f"{total:.3f}",
+            cmd += ["-c:v", "libx264", "-preset", preset, "-crf", "14" if preset == "medium" else "15",
+                    "-profile:v", "high", "-pix_fmt", "yuv420p", "-t", f"{total:.3f}",
                     "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(tmp)]
             with (d / "export.log").open("wb") as logf:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=logf, text=True)
@@ -833,7 +899,7 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
     imgs = sanitize_imgs(raw_imgs)
     texts = sanitize_texts(body.get("texts"), d)
     width = int(body.get("width") or 0)
-    width = width if width in (720, 1080) else 0
+    width = width if 240 <= width <= 4320 else 0
     preset = body.get("preset") if body.get("preset") in ("veryfast", "medium") else "veryfast"
     JOBS[pid] = {"status": "queued", "progress": 0, "error": ""}
     bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs)
