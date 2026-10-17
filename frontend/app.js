@@ -33,6 +33,12 @@ const scrU = t => head >= t.start - 1e-6 && head < t.start + t.dur ? head - t.st
 const scrOff = t => scrDir(t) * (t.spd || 0.2) * scrU(t);
 const wrapX = (p, w) => { const L = 1 + w, lo = -w / 2; return lo + (((p - lo) % L) + L) % L; };
 const dispX = (t, w) => scrDir(t) ? wrapX(t.x + scrOff(t), w) : t.x;
+// ---- vertical scroll: t.scv = -1 උඩට (පහළින් උඩට) / 1 පහළට (උඩින් පහළට) · speed = canvas height එකෙන් තත්පරයකට (t.spd) ----
+const scrV = t => +t.scv || 0;
+const isScr = t => !!(scrDir(t) || scrV(t));
+const scrOffY = t => scrV(t) * (t.spd || 0.2) * scrU(t);
+const dispY = (t, h) => scrV(t) ? wrapX(t.y + scrOffY(t), h) : t.y;
+const imHf = t => { const a = t.emoji ? null : asset(t.asset), ar = a?.w && a?.h ? a.w / a.h : 1; return t.w * (stage.clientWidth || 1) / ar / (stage.clientHeight || 1); };
 
 // ================= audio engine (SFX + music preview) =================
 let ac = null, live = [], prev = null;
@@ -285,7 +291,7 @@ function render() {
     let rw = rowsEnd.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = rowsEnd.length; rowsEnd.push(0); }
     rowsEnd[rw] = t.start + t.dur;
     add('txi' + (t.id === selText ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: 144 + rw * 32 + 'px' },
-      (scrDir(t) ? (scrDir(t) < 0 ? 'T ⇠ ' : 'T ⇢ ') : 'T  ') + (t.text.split('\n')[0] || '(empty)')).dataset.id = t.id;
+      (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? 'T ⇡ ' : 'T ⇣ ') : scrDir(t) < 0 ? 'T ⇠ ' : 'T ⇢ ') : 'T  ') + (t.text.split('\n')[0] || '(empty)')).dataset.id = t.id;
   });
   const nr = Math.max(1, rowsEnd.length);
   $('#txlane').style.height = nr * 32 + 2 + 'px';
@@ -294,7 +300,7 @@ function render() {
     let rw = imRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = imRows.length; imRows.push(0); }
     imRows[rw] = t.start + t.dur;
     add('imi' + (t.id === selImg ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: imTop + rw * 32 + 'px' },
-      (t.emoji ? '' : '🖼 ') + (scrDir(t) ? (scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+      (t.emoji ? '' : '🖼 ') + (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? '⇡ ' : '⇣ ') : scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
@@ -882,7 +888,7 @@ $('#export').onclick = async () => {
     for (const t of texts) {
       if (!t.text.trim()) continue;
       const rr = await renderTextPng(t, W);
-      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, scr: scrDir(t), spd: t.spd || 0.2, start: t.start, end: t.start + t.dur });
+      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, scr: scrDir(t), scv: scrV(t), spd: t.spd || 0.2, start: t.start, end: t.start + t.dur });
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
@@ -1028,7 +1034,7 @@ $('#homebtn').onclick = e => { goHome(); e.target.blur(); };
 
 // ================= text layers =================
 const TXDEF = { text: 'Text', font: 'Nirmala UI', size: 0.07, bold: false, italic: false, underline: false, outline: false,
-  color: '#ffffff', align: 'center', x: 0.5, y: 0.8, start: 0, dur: 3, op: 1, scr: 0, spd: 0.2 };
+  color: '#ffffff', align: 'center', x: 0.5, y: 0.8, start: 0, dur: 3, op: 1, scr: 0, scv: 0, spd: 0.2 };
 const SYS_FONTS = ['Nirmala UI', 'Iskoola Pota', 'Noto Sans Sinhala', 'Segoe UI', 'Arial', 'Verdana', 'Georgia', 'Times New Roman', 'Impact', 'Comic Sans MS'];
 const FALLBACK = '"Nirmala UI","Iskoola Pota","Noto Sans Sinhala","Noto Sans",sans-serif';   // සිංහල glyphs නැති font වලට fallback
 const COLORS = ['#ffffff', '#000000', '#ff3b30', '#ffd60a', '#34c759', '#0a84ff', '#ff9f0a', '#ff2d92', '#bf5af2', '#00e5ff'];
@@ -1058,7 +1064,8 @@ function placeEl(el, t, W) {
   Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: PADK + 'em',
     fontFamily: fam(t.font), fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? 'italic' : 'normal', color: t.color, textAlign: t.align });
   if (scrDir(t)) el.style.left = dispX(t, el._wf || 0.2) * 100 + '%';
-  el._xl = null;
+  if (scrV(t)) el.style.top = dispY(t, el._hf || 0.1) * 100 + '%';
+  el._xl = null; el._yl = null;
   const tt = el.firstChild;
   tt.style.textDecoration = t.underline ? 'underline' : 'none';
   tt.style.webkitTextStroke = t.outline ? `${0.14 * px}px #000` : '0';
@@ -1087,10 +1094,12 @@ function applyText(force) {   // text එක පෙන්නන්නේ එහ�
     const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selText ? 2 : 0;
     const o = v === 2 ? 0.4 : (t.op ?? 1);
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
-    if (scrDir(t) && v) {   // scroll: හැම frame එකකම position එක update
+    if (isScr(t) && v) {   // scroll: හැම frame එකකම position එක update
       el._wf = el.offsetWidth / (stage.clientWidth || 1) || 0.2;
-      const xl = dispX(t, el._wf);
+      el._hf = el.offsetHeight / (stage.clientHeight || 1) || 0.1;
+      const xl = dispX(t, el._wf), yl = dispY(t, el._hf);
       if (el._xl !== xl) { el._xl = xl; el.style.left = xl * 100 + '%'; }
+      if (el._yl !== yl) { el._yl = yl; el.style.top = yl * 100 + '%'; }
     }
   }
 }
@@ -1134,9 +1143,11 @@ txov.addEventListener('pointerdown', e => {
   if (selText !== t.id) { clearSel(); selText = t.id; render(); }
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
-  const px0 = e.clientX, py0 = e.clientY, y0 = t.y, s0 = t.size, bw = el.offsetWidth, bh = el.offsetHeight;
+  const px0 = e.clientX, py0 = e.clientY, s0 = t.size, bw = el.offsetWidth, bh = el.offsetHeight;
+  const y0 = dispY(t, bh / H), scv = scrV(t), offY = scv ? scrOffY(t) : 0;
   const sc = scrDir(t), off = sc ? scrOff(t) : 0, x0 = dispX(t, bw / W);   // scroll text: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
   const setX = cx => { t.x = sc ? wrapX(cx - off, bw / W) : cx; };
+  const setY = cy => { t.y = scv ? wrapX(cy - offY, bh / H) : cy; };
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -1150,7 +1161,7 @@ txov.addEventListener('pointerdown', e => {
       const k = Math.max(0.1, Math.min(8, (px * vx + py * vy) / (vx * vx + vy * vy)));
       t.size = Math.max(0.015, Math.min(0.5, s0 * k));
       const kk = t.size / s0;
-      setX((fx + sx * bw * kk / 2) / W); t.y = (fy + sy * bh * kk / 2) / H;
+      setX((fx + sx * bw * kk / 2) / W); setY((fy + sy * bh * kk / 2) / H);
     } else {
       let nx = x0 + dx / W, ny = y0 + dy / H, gv = null, gh = null;
       nx = Math.max(0, Math.min(1, nx)); ny = Math.max(0, Math.min(1, ny));
@@ -1160,7 +1171,7 @@ txov.addEventListener('pointerdown', e => {
         const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
         nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
-      setX(nx); t.y = ny; guides(gv, gh);
+      setX(nx); setY(ny); guides(gv, gh);
     }
     placeEl(el, t, W);
     if (selText === t.id) syncText(t, true);
@@ -1243,10 +1254,10 @@ function syncText(t, light) {   // light = drag වෙලාවේ number inputs
   if (document.activeElement !== $('#tdur')) $('#tdur').value = (+t.dur).toFixed(2);
   $('#tsize').value = t.size * 100; $('#tsizev').textContent = (t.size * 100).toFixed(1) + '%';
   const to = Math.round((t.op ?? 1) * 100); $('#topac').value = to; $('#topacv').textContent = to + '%';
-  const tx = Math.round(t.x * 100), ty = Math.round(t.y * 100), td = scrDir(t), ts = Math.round((t.spd || 0.2) * 100);
+  const tx = Math.round(t.x * 100), ty = Math.round(t.y * 100), td = scrDir(t), tv = scrV(t), ts = Math.round((t.spd || 0.2) * 100);
   $('#tpx').value = tx; $('#tpxv').textContent = tx + '%'; $('#tpy').value = ty; $('#tpyv').textContent = ty + '%';
-  $('#tspd').value = ts; $('#tspdv').textContent = ts + '%/s'; $('#tspd').disabled = !td;
-  [['#tscr0', !td], ['#tscrL', td < 0], ['#tscrR', td > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
+  $('#tspd').value = ts; $('#tspdv').textContent = ts + '%/s'; $('#tspd').disabled = !(td || tv);
+  [['#tscr0', !td && !tv], ['#tscrL', td < 0], ['#tscrR', td > 0], ['#tscrU', tv < 0], ['#tscrD', tv > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
   if (light) return;
   if ($('#ttext').value !== t.text) $('#ttext').value = t.text;
   const mine = fonts.map(f => `<option value="uf_${f.id}">${esc(f.name)}</option>`).join('');
@@ -1281,9 +1292,12 @@ $('#tpx').oninput = e => editT('Text X', t => t.x = +e.target.value / 100);
 $('#tpy').oninput = e => editT('Text Y', t => t.y = +e.target.value / 100);
 $('#tspd').oninput = e => editT('Text scroll speed', t => t.spd = clampN(+e.target.value / 100, 0.02, 1.5));
 ['#tpx', '#tpy', '#tspd'].forEach(id => $(id).onchange = e => e.target.blur());
-$('#tscr0').onclick = e => { editT('Text scroll', t => t.scr = 0); e.target.blur(); };
-$('#tscrL').onclick = e => { editT('Text scroll', t => { t.scr = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };
-$('#tscrR').onclick = e => { editT('Text scroll', t => { t.scr = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#tscr0').onclick = e => { editT('Text scroll', t => { t.scr = 0; t.scv = 0; }); e.target.blur(); };
+$('#tscrL').onclick = e => { editT('Text scroll', t => { t.scr = -1; t.scv = 0; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#tscrR').onclick = e => { editT('Text scroll', t => { t.scr = 1; t.scv = 0; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#tscrU').onclick = e => { editT('Text scroll', t => { t.scr = 0; t.scv = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };   // පහළින් උඩට
+$('#tscrD').onclick = e => { editT('Text scroll', t => { t.scr = 0; t.scv = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };    // උඩින් පහළට
+$('#twhole').onclick = e => { editT('Text whole video', t => { t.start = 0; t.dur = +Math.max(0.2, total()).toFixed(2); }); e.target.blur(); };
 $('#tcx').onclick = () => editT('Center text X', t => t.x = 0.5);
 $('#tcy').onclick = () => editT('Center text Y', t => t.y = 0.5);
 $('#tdup').onclick = () => { const t = curText(); if (!t) return; snap('Duplicate text'); const n = { ...t, id: uid(), x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; texts.push(n); selText = n.id; changed(); };
@@ -1433,14 +1447,14 @@ $('#emq').oninput = renderEmojiGrid;
 $('#emgrid').addEventListener('click', e => { const b = e.target.closest('.emb'); if (b) addEmoji(b.dataset.u); });
 
 // ================= image overlays =================
-const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3, rad: 0, scr: 0, spd: 0.2 };
+const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3, rad: 0, scr: 0, scv: 0, spd: 0.2 };
 const normI = t => ({ ...IMDEF, ...t });
 const curImg = () => imgs.find(x => x.id === selImg);
 const imov = $('#imov');
 
 function placeImg(el, t) {
-  Object.assign(el.style, { left: dispX(t, t.w) * 100 + '%', top: t.y * 100 + '%', width: t.w * 100 + '%' });
-  el._xl = null;
+  Object.assign(el.style, { left: dispX(t, t.w) * 100 + '%', top: dispY(t, imHf(t)) * 100 + '%', width: t.w * 100 + '%' });
+  el._xl = null; el._yl = null;
   const im = el.firstChild, src = t.emoji ? `/api/emoji/${t.emoji}.png` : `/api/assets/${t.asset}/file`;
   if (im.getAttribute('src') !== src) im.src = src;
   // corner radius (px): image එකේ පොඩි පැත්තේ fraction × radius
@@ -1472,9 +1486,10 @@ function applyImg(force) {   // image එක පෙන්නන්නේ එහ�
     const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selImg ? 2 : 0;
     const o = v === 2 ? 0.35 : t.op;
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
-    if (scrDir(t) && v) {   // scroll: හැම frame එකකම position එක update
-      const xl = dispX(t, t.w);
+    if (isScr(t) && v) {   // scroll: හැම frame එකකම position එක update
+      const xl = dispX(t, t.w), yl = dispY(t, imHf(t));
       if (el._xl !== xl) { el._xl = xl; el.style.left = xl * 100 + '%'; }
+      if (el._yl !== yl) { el._yl = yl; el.style.top = yl * 100 + '%'; }
     }
   }
 }
@@ -1508,9 +1523,11 @@ imov.addEventListener('pointerdown', e => {
   if (selImg !== t.id) { clearSel(); selImg = t.id; render(); }
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
-  const px0 = e.clientX, py0 = e.clientY, x0 = dispX(t, t.w), y0 = t.y, w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
+  const px0 = e.clientX, py0 = e.clientY, x0 = dispX(t, t.w), y0 = dispY(t, imHf(t)), w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
   const isG = !!t.grp, list = grpList(t), gc = grpCenter(list);
   const sc = !isG && scrDir(t), off = sc ? scrOff(t) : 0;   // scroll image: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
+  const scv = !isG && scrV(t), offY = scv ? scrOffY(t) : 0, hf = imHf(t);
+  const setY = cy => { t.y = scv ? wrapX(cy - offY, hf) : cy; };
   const setX = cx => { t.x = sc ? wrapX(cx - off, t.w) : cx; };   // group = emoji කීපයක් එකට (spacing + size fixed, center)
   const gd0 = Math.hypot(e.clientX - R.left - gc.cx * W, e.clientY - R.top - gc.cy * H) || 1;
   let moved = false;
@@ -1542,7 +1559,7 @@ imov.addEventListener('pointerdown', e => {
         const k = Math.max(0.05, Math.min(10, (px * vx + py * vy) / (vx * vx + vy * vy)));
         t.w = Math.max(0.03, Math.min(4, w0 * k));
         const kk = t.w / w0;
-        setX((fx + sx * bw * kk / 2) / W); t.y = (fy + sy * bh * kk / 2) / H;
+        setX((fx + sx * bw * kk / 2) / W); setY((fy + sy * bh * kk / 2) / H);
       } else {
         let nx = clampN(x0 + dx / W, 0, 1), ny = clampN(y0 + dy / H, 0, 1), gv = null, gh = null;
         if (snapOn && !ev.altKey) {
@@ -1551,7 +1568,7 @@ imov.addEventListener('pointerdown', e => {
           const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
           nx = a.c; ny = b.c; gv = a.line; gh = b.line;
         }
-        setX(nx); t.y = ny; guides(gv, gh);
+        setX(nx); setY(ny); guides(gv, gh);
       }
       placeImg(el, t);
     }
@@ -1573,14 +1590,14 @@ function syncImg(t, light) {
   const sz = Math.round(t.w * 100), op = Math.round(t.op * 100);
   $('#isize').value = sz; $('#isizev').textContent = sz + '%';
   $('#iop').value = op; $('#iopv').textContent = op + '%';
-  const rd = Math.round((t.rad || 0) * 100), px = Math.round(t.x * 100), py = Math.round(t.y * 100), sd = scrDir(t), ss = Math.round((t.spd || 0.2) * 100);
+  const rd = Math.round((t.rad || 0) * 100), px = Math.round(t.x * 100), py = Math.round(t.y * 100), sd = scrDir(t), sv = scrV(t), ss = Math.round((t.spd || 0.2) * 100);
   $('#irad').value = rd; $('#iradv').textContent = rd + '%';
   $('#ipx').value = px; $('#ipxv').textContent = px + '%'; $('#ipy').value = py; $('#ipyv').textContent = py + '%';
   $('#ispd').value = ss; $('#ispdv').textContent = ss + '%/s';
-  [['#iscr0', !sd], ['#iscrL', sd < 0], ['#iscrR', sd > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
+  [['#iscr0', !sd && !sv], ['#iscrL', sd < 0], ['#iscrR', sd > 0], ['#iscrU', sv < 0], ['#iscrD', sv > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
   const grouped = !!t.grp && grpList(t).length > 1;   // emoji group = scroll නෑ
-  ['#iscr0', '#iscrL', '#iscrR', '#ipx', '#ipy'].forEach(id => $(id).disabled = grouped);
-  $('#ispd').disabled = grouped || !sd; $('#iscrnote').textContent = grouped ? 'Emoji group එකට scroll/position slider නෑ (Ungroup කරන්න)' : sd ? 'X = පටන් ගන්න තැන · preview එකේ mouse එකෙන් drag කරන්න පුළුවන්' : '';
+  ['#iscr0', '#iscrL', '#iscrR', '#iscrU', '#iscrD', '#ipx', '#ipy'].forEach(id => $(id).disabled = grouped);
+  $('#ispd').disabled = grouped || !(sd || sv); $('#iscrnote').textContent = grouped ? 'Emoji group එකට scroll/position slider නෑ (Ungroup කරන්න)' : (sd || sv) ? (sv ? 'Y' : 'X') + ' = පටන් ගන්න තැන · preview එකේ mouse එකෙන් drag කරන්න පුළුවන්' : '';
   if (light) return;
   const n = grpList(t).length;
   $('#iname').textContent = imLabel(t) + (t.grp && n > 1 ? ` · group (${n})` : '');
@@ -1595,9 +1612,12 @@ $('#ipx').oninput = e => editI('Image X', t => t.x = +e.target.value / 100);
 $('#ipy').oninput = e => editI('Image Y', t => t.y = +e.target.value / 100);
 $('#ispd').oninput = e => editI('Image scroll speed', t => t.spd = clampN(+e.target.value / 100, 0.02, 1.5));
 ['#irad', '#ipx', '#ipy', '#ispd'].forEach(id => $(id).onchange = e => e.target.blur());
-$('#iscr0').onclick = e => { editI('Image scroll', t => t.scr = 0); e.target.blur(); };
-$('#iscrL').onclick = e => { editI('Image scroll', t => { t.scr = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };
-$('#iscrR').onclick = e => { editI('Image scroll', t => { t.scr = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#iscr0').onclick = e => { editI('Image scroll', t => { t.scr = 0; t.scv = 0; }); e.target.blur(); };
+$('#iscrL').onclick = e => { editI('Image scroll', t => { t.scr = -1; t.scv = 0; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#iscrR').onclick = e => { editI('Image scroll', t => { t.scr = 1; t.scv = 0; t.spd = t.spd || 0.2; }); e.target.blur(); };
+$('#iscrU').onclick = e => { editI('Image scroll', t => { t.scr = 0; t.scv = -1; t.spd = t.spd || 0.2; }); e.target.blur(); };   // පහළින් උඩට
+$('#iscrD').onclick = e => { editI('Image scroll', t => { t.scr = 0; t.scv = 1; t.spd = t.spd || 0.2; }); e.target.blur(); };    // උඩින් පහළට
+$('#iwhole').onclick = e => { editI('Image whole video', t => { t.start = 0; t.dur = +Math.max(0.2, total()).toFixed(2); }); e.target.blur(); };
 $('#istart').onchange = e => editI('Image time', t => t.start = Math.max(0, +e.target.value || 0));
 $('#idur').onchange = e => editI('Image time', t => t.dur = Math.max(0.2, +e.target.value || 3));
 $('#ifit').onclick = e => { editI('Image → video end', t => { t.start = Math.min(t.start, Math.max(0, total() - MINT)); t.dur = Math.max(MINT, total() - t.start); }); e.target.blur(); };

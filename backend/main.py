@@ -782,7 +782,7 @@ def sanitize_texts(raw, d: Path):
                     "wf": clamp(t.get("wf"), 0.001, 4, 0.3),
                     "x": clamp(t.get("x"), -2, 3, 0.5), "y": clamp(t.get("y"), 0, 1, 0.5),
                     "op": clamp(t.get("op"), 0, 1, 1),
-                    "scr": scr_dir(t.get("scr")), "spd": clamp(t.get("spd"), 0.005, 3, 0.2),
+                    "scr": scr_dir(t.get("scr")), "scv": scr_dir(t.get("scv")), "spd": clamp(t.get("spd"), 0.005, 3, 0.2),
                     "start": s0, "end": max(s0 + 0.05, clamp(t.get("end"), 0, 36000, s0 + 3))})
     return out
 
@@ -806,7 +806,7 @@ def sanitize_imgs(raw):
         out.append({"path": p, "w": clamp(x.get("w"), 0.01, 4, 0.4),
                     "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), 0, 1, 0.5),
                     "op": clamp(x.get("op"), 0, 1, 1), "rad": clamp(x.get("rad"), 0, 0.5, 0),
-                    "scr": scr_dir(x.get("scr")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
+                    "scr": scr_dir(x.get("scr")), "scv": scr_dir(x.get("scv")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
                     "start": s0, "end": s0 + d})
     return out
 
@@ -939,6 +939,15 @@ def ov_x(o):
     return f"x=main_w*({o['x']:.5f})-overlay_w/2"
 
 
+def ov_y(o):
+    """overlay y expression. vertical scroll (scv: -1 = පහළින් උඩට, 1 = උඩින් පහළට): ov_x එකේම wrap formula, canvas උසෙන් (preview එකේ wrapX එකම)"""
+    if o.get("scv"):
+        v = o["scv"] * o["spd"]
+        return (f"y='-overlay_h+mod(main_h*({o['y']:.5f})+overlay_h/2+({v:.5f})*main_h*(t-{o['start']:.3f})"
+                f"+100000*(main_h+overlay_h),main_h+overlay_h)'")
+    return f"y=main_h*{o['y']:.5f}-overlay_h/2"
+
+
 def atempo(s: float) -> str:
     parts = []
     while s < 0.5:
@@ -1055,7 +1064,7 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
             chains.append(f"[ib{k}][ina{k}]alphamerge{opa}[im{k}]")
         else:
             chains.append(f"[{ibase + k}:v]format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
-        chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:y=main_h*{im['y']:.5f}-overlay_h/2"
+        chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:{ov_y(im)}"
                       f":enable='between(t,{im['start']:.3f},{im['end']:.3f})':format=auto[vi{k}]")
         vlabel = f"[vi{k}]"
     for k, t in enumerate(texts or []):   # text layers: concat එකට පස්සේ overlay (flash/transition වලට උඩින්)
@@ -1066,7 +1075,7 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
         if t.get("op", 1) < 0.999:
             fl.append(f"colorchannelmixer=aa={t['op']:.3f}")
         chains.append(f"[{tbase + k}:v]" + ",".join(fl) + f"[tx{k}]")
-        chains.append(f"{vlabel}[tx{k}]overlay={ov_x(t)}:y=main_h*{t['y']:.5f}-overlay_h/2"
+        chains.append(f"{vlabel}[tx{k}]overlay={ov_x(t)}:{ov_y(t)}"
                       f":enable='between(t,{t['start']:.3f},{t['end']:.3f})':format=auto[vt{k}]")
         vlabel = f"[vt{k}]"
     if texts or imgs:
