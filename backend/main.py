@@ -552,9 +552,10 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
         # video overlay: mp4 (h264, sound නැතුව, උපරිම 1280px) + poster thumbnail — preview (browser) + export දෙකටම එකම file එක
         out = ASSETS / f"{aid}.mp4"
         try:
-            r = subprocess.run([FFMPEG, "-y", "-i", str(path), "-an", "-vf",
+            # sound is KEPT (aac stereo) — each overlay video gets its own mute / volume in the editor
+            r = subprocess.run([FFMPEG, "-y", "-i", str(path), "-map", "0:v:0", "-map", "0:a:0?", "-vf",
                                 "scale='min(1280,iw)':-2:flags=lanczos,fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast",
-                                "-crf", "20", "-movflags", "+faststart", str(out)], capture_output=True, timeout=1800)
+                                "-crf", "20", "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-movflags", "+faststart", str(out)], capture_output=True, timeout=1800)
         except (OSError, subprocess.TimeoutExpired):
             r = None
         path.unlink(missing_ok=True)
@@ -589,6 +590,7 @@ async def upload_asset(file: UploadFile = File(...), kind: str = Form("sfx")):
         m["w"], m["h"] = pr["width"], pr["height"]
         if isvid:
             m["vid"] = True
+            m["has_audio"] = bool(pr["has_audio"])
     (ASSETS / f"{aid}.json").write_text(json.dumps(m))
     return m
 
@@ -885,6 +887,7 @@ def sanitize_imgs(raw):
                     "h": clamp(x.get("h"), 0, 8, 0),   # 0 = auto (file's own aspect ratio) · > 0 = freely resized height (fraction of canvas height)
                     "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), -2, 3, 0.5),
                     "z": clamp(x.get("z"), -1e6, 1e6, None),   # layer order (higher = in front)
+                    "mute": bool(x.get("mute")), "vol": clamp(x.get("vol"), 0, 2, 1),   # video overlay sound (own mute / volume)
                     "op": clamp(x.get("op"), 0, 1, 1), "rad": clamp(x.get("rad"), 0, 0.5, 0),
                     "scr": scr_dir(x.get("scr")), "scv": scr_dir(x.get("scv")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
                     "vid": (not x.get("emoji")) and p.suffix.lower() in VID_EXT,
@@ -1143,7 +1146,8 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
             tags += f"[a{i}]"
     chains.append(f"{tags}concat=n={n}:v=1:a={1 if has_audio else 0}[v]"
                   + ("[abase]" if has_audio else ""))
-    extras = bool(sfx or music)
+    ovaud = [(k, im) for k, im in enumerate(imgs or []) if im.get("aud")]   # video overlays with sound
+    extras = bool(sfx or music or ovaud)
     label = None
     if extras:
         if not has_audio:
@@ -1161,6 +1165,11 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
                 m += f",afade=t=out:st={total - f:.3f}:d={f:.3f}"
             chains.append(m + "[mus]")
             parts.append("[mus]")
+        for k, im in ovaud:   # overlay video sound: starts at the item's start, loops (input has -stream_loop) for its length
+            ms = round(im["start"] * 1000)
+            chains.append(f"[{ibase + k}:a]{fm},volume={im['vol']:.3f},atrim=duration={im['end'] - im['start']:.3f},"
+                          f"asetpts=PTS-STARTPTS,adelay={ms}|{ms}[ova{k}]")
+            parts.append(f"[ova{k}]")
         chains.append("".join(parts) + f"amix=inputs={len(parts)}:normalize=0:duration=first,alimiter=limit=0.97[aout]")
         label = "[aout]"
     elif has_audio:
@@ -1284,6 +1293,8 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                     mask_png(mp, w, h, R)
                     im["mi"], im["ph"] = nxt + len(extra), h
                     extra.append(mp)
+            for im in imgs:   # video overlays: own sound (independent of the main video's mute)
+                im["aud"] = bool(im.get("vid")) and not im.get("mute") and im.get("vol", 1) > 0.001 and bool(probe(im["path"])["has_audio"])
             has_audio = bool(info["has_audio"]) and not mute   # mute = main video එකේ sound එක අයින් (SFX / music ඉතිරියි)
             graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners, bgcol, shapes, sbase)
             tmp = d / "output_tmp.mp4"

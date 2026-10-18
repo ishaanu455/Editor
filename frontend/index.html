@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 <header>
@@ -247,6 +247,12 @@
             <span class="hint" id="ifreenote">Drag any <b>corner</b> or <b>side</b> handle in the preview to resize freely · hold <b>Shift</b> to keep the proportions.</span>
             <label title="Round the corners of the image">Corner radius <input id="irad" type="range" min="0" max="50" step="1" value="0"> <span id="iradv" class="v"></span></label>
           </div>
+          <div class="ig" id="isndg" hidden>
+            <b>Sound (video)</b>
+            <span class="btnrow"><button id="imute" class="tog" title="Mute / unmute this video's own sound">🔊 Sound on</button></span>
+            <label>Volume <input id="ivol" type="range" min="0" max="200" step="5" value="100"> <span id="ivolv" class="v"></span></label>
+            <span class="hint" id="isndnote"></span>
+          </div>
           <div class="ig">
             <b>Position</b>
             <label>X <input id="ipx" type="range" min="0" max="100" step="0.5"> <span id="ipxv" class="v"></span></label>
@@ -361,7 +367,7 @@
       <div class="tgrp">
         <button id="linkbtn" class="tog on" title="Linked: the main item cannot be deleted (all other items stay safe). Unlink to delete only the main item — text / image / FX / SFX / music stay as they are and the duration is kept">🔗 Linked</button>
         <label class="btn" id="replbtn" title="Replace the main video / image — everything else stays">🔁 Replace main<input id="replfile" type="file" accept="video/*,image/*" hidden></label>
-        <button id="mutebtn" class="tog" title="Mute / unmute the main video's sound (preview + export)">🔊 Main sound</button>
+        <button id="mutebtn" class="tog" title="Mute / unmute the MAIN video's sound only (preview + export) — overlay videos keep their own sound">🔊 Main sound</button>
         <button id="extractbtn" title="Extract the main video's audio into the Music library">🎵 Extract audio</button>
       </div>
       <span id="time">0:00.0 / 0:00.0</span>
@@ -385,6 +391,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

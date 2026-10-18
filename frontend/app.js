@@ -326,7 +326,7 @@ function render() {
     let rw = imRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = imRows.length; imRows.push(0); }
     imRows[rw] = t.start + t.dur;
     add('imi' + (t.id === selImg ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: imTop + rw * 32 + 'px' },
-      (t.emoji ? '' : asset(t.asset)?.vid ? '🎬 ' : '🖼 ') + (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? '⇡ ' : '⇣ ') : scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+      (t.emoji ? '' : asset(t.asset)?.vid ? (t.mute && asset(t.asset)?.has_audio ? '🎬🔇 ' : '🎬 ') : '🖼 ') + (isScr(t) ? (scrV(t) ? (scrV(t) < 0 ? '⇡ ' : '⇣ ') : scrDir(t) < 0 ? '⇠ ' : '⇢ ') : '') + imLabel(t) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
@@ -727,7 +727,7 @@ stage.addEventListener('pointerdown', e => {
   if (sel !== cur || sel < 0) { const i = tlToClip(head).i; clearSel(); sel = i; render(); }
   const c = clips[sel]; if (!c) return;
   e.preventDefault();
-  const R = stage.getBoundingClientRect(), W = R.width, H = R.height, p = placeOf(c, W, H);
+  const R = stage.getBoundingClientRect(), W = R.width, H = R.height, p = placeOf(c, W, H), mol = objLines(null, null, false);
   let moved = false;
   stage.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -737,6 +737,7 @@ stage.addEventListener('pointerdown', e => {
     if (snapOn && !ev.altKey) {
       const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
       if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+      vl.push(...mol.vx); hl.push(...mol.hy);
       const a = snap1(nx, p.w / W / 2, vl, 7 / W), b = snap1(ny, p.h / H / 2, hl, 7 / H);
       nx = a.c; ny = b.c; gv = a.line; gh = b.line;
     }
@@ -1285,6 +1286,7 @@ txov.addEventListener('pointerdown', e => {
   const sc = scrDir(t), off = sc ? scrOff(t) : 0, x0 = dispX(t, bw / W);   // scroll text: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
   const setX = cx => { t.x = sc ? wrapX(cx - off, bw / W) : cx; };
   const setY = cy => { t.y = scv ? wrapX(cy - offY, bh / H) : cy; };
+  const ol = objLines(el);
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -1305,6 +1307,7 @@ txov.addEventListener('pointerdown', e => {
       if (snapOn && !ev.altKey) {
         const vl = [{ v: 0.5, center: true }], hl = [{ v: 0.5, center: true }];
         if (gridOn) for (const v of [0, 1 / 3, 2 / 3, 1]) { vl.push({ v }); hl.push({ v }); }
+        vl.push(...ol.vx); hl.push(...ol.hy);
         const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
         nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
@@ -1650,7 +1653,7 @@ document.querySelectorAll('[data-lay]').forEach(b => b.onclick = e => { layerMov
 
 // ================= image overlays =================
 // h = 0 → height follows the file's aspect ratio · h > 0 → freely resized height (fraction of canvas height) · lock = keep proportions while resizing
-const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, h: 0, lock: false, op: 1, start: 0, dur: 3, rad: 0, scr: 0, scv: 0, spd: 0.2 };
+const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, h: 0, lock: false, mute: false, vol: 1, op: 1, start: 0, dur: 3, rad: 0, scr: 0, scv: 0, spd: 0.2 };
 const normI = t => ({ ...IMDEF, ...t });
 const curImg = () => imgs.find(x => x.id === selImg);
 const imov = $('#imov');
@@ -1697,6 +1700,8 @@ function applyImg(force) {   // image එක පෙන්නන්නේ එහ�
     if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
     if (el._vid) {   // video overlay: timeline head එකට sync (play වෙද්දී play, නැත්නම් pause + seek)
       const vv = el.firstChild, vd = vv.duration || asset(t.asset)?.duration || 0;
+      const mt = !asset(t.asset)?.has_audio || !!t.mute, vl = clampN(+(t.vol ?? 1), 0, 1);   // own sound: independent of the main video's mute
+      if (vv.muted !== mt) vv.muted = mt; if (Math.abs(vv.volume - vl) > 0.01) vv.volume = vl;
       if (v === 1 && vd > 0 && isFinite(vd)) {
         const want = Math.max(0, head - t.start) % vd;
         if (playing) {
@@ -1743,6 +1748,28 @@ function delImg() {
 //  · side handle = stretch one direction only · corner handle = stretch width + height freely
 //  · hold Shift (or tick "Keep proportions") = keep the proportions
 const MINBOX = 0.02, OUTMIN = -0.3, OUTMAX = 1.3;
+// Snap lines from the OTHER items visible at the playhead (left / center / right and top / middle / bottom of each box)
+// and from the main video's area — a guide line shows when you move / resize something close to them.
+function objLines(exceptEl, skipIds, withMain = true) {
+  const R = stage.getBoundingClientRect(), W = R.width || 1, H = R.height || 1, vx = [], hy = [];
+  const add = (l, t, w, h) => { vx.push({ v: l / W }, { v: (l + w / 2) / W }, { v: (l + w) / W }); hy.push({ v: t / H }, { v: (t + h / 2) / H }, { v: (t + h) / H }); };
+  for (const el of stage.querySelectorAll('#imov .im, #shov .sp, #txov .tx')) {
+    if (el === exceptEl || el._v !== 1 || (skipIds && skipIds.has(el.dataset.id))) continue;   // only items that are visible right now
+    const b = el.getBoundingClientRect(); if (b.width < 2 || b.height < 2) continue;
+    add(b.left - R.left, b.top - R.top, b.width, b.height);
+  }
+  const c = withMain && clips.length ? clips[tlToClip(head).i] : null;
+  if (c) {
+    const p = placeOf(c, W, H), x0 = Math.max(0, p.cx - p.w / 2), x1 = Math.min(W, p.cx + p.w / 2), y0 = Math.max(0, p.cy - p.h / 2), y1 = Math.min(H, p.cy + p.h / 2);
+    if (x1 - x0 > 4 && y1 - y0 > 4) add(x0, y0, x1 - x0, y1 - y0);
+  }
+  return { vx, hy };
+}
+function nearLine(px, lines, size, tolPx) {   // nearest snap line to a pixel position
+  let best = null;
+  for (const L of lines) { const d = L.v * size - px; if (Math.abs(d) < tolPx && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, L }; }
+  return best;
+}
 function startBoxDrag(e, el, t, cfg) {
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
@@ -1752,6 +1779,7 @@ function startBoxDrag(e, el, t, cfg) {
   const x0 = cfg.scroll ? dispX(t, t.w) : t.x, y0 = cfg.scroll ? dispY(t, imHf(t)) : t.y;   // scroll item: drag from where it is NOW, t.x / t.y = its starting point
   const setX = cx => { t.x = sc ? wrapX(cx - off, t.w) : cx; };
   const setY = cy => { t.y = scv ? wrapX(cy - offY, cfg.hf(t)) : cy; };
+  const ol = objLines(el);
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
   const mv = ev => {
@@ -1762,10 +1790,20 @@ function startBoxDrag(e, el, t, cfg) {
       const l = handle.includes('l'), r = handle.includes('r'), tp = handle.includes('t'), b = handle.includes('b'), corner = (l || r) && (tp || b);
       const cx0 = x0 * W, cy0 = y0 * H, L = cx0 - bw / 2, Rt = cx0 + bw / 2, T = cy0 - bh / 2, B = cy0 + bh / 2;
       const px = ev.clientX - R.left, py = ev.clientY - R.top, MN = MINBOX * Math.min(W, H);
-      let nL = L, nR = Rt, nT = T, nB = B;
+      let nL = L, nR = Rt, nT = T, nB = B, gv = null, gh = null;
       if (l) nL = Math.min(px, Rt - MN); if (r) nR = Math.max(px, L + MN);   // free: only the dragged edges move
       if (tp) nT = Math.min(py, B - MN); if (b) nB = Math.max(py, T + MN);
       const keep = ev.shiftKey || !!t.lock;
+      if (snapOn && !ev.altKey && !keep) {   // the dragged edge snaps to the canvas / other items / the main video
+        const base = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }]; if (gridOn) for (const v of [1 / 3, 2 / 3]) base.push({ v });
+        const vls = [...base, ...ol.vx], hls = [...base, ...ol.hy];
+        const fix = (cur, lines, size, lo, hi) => { const n = nearLine(cur, lines, size, 7); return n && cur + n.d >= lo && cur + n.d <= hi ? n : null; };
+        let q;
+        if (l && (q = fix(nL, vls, W, -1e9, Rt - MN))) { nL += q.d; gv = q.L; }
+        if (r && (q = fix(nR, vls, W, L + MN, 1e9))) { nR += q.d; gv = q.L; }
+        if (tp && (q = fix(nT, hls, H, -1e9, B - MN))) { nT += q.d; gh = q.L; }
+        if (b && (q = fix(nB, hls, H, T + MN, 1e9))) { nB += q.d; gh = q.L; }
+      }
       if (keep) {
         if (corner) {   // opposite corner stays fixed, scale along the diagonal
           const sx = l ? -1 : 1, sy = tp ? -1 : 1, fx = l ? Rt : L, fy = tp ? B : T, vx = sx * bw, vy = sy * bh;
@@ -1780,12 +1818,13 @@ function startBoxDrag(e, el, t, cfg) {
       const newW = nR - nL, newH = nB - nT;
       t.w = clampN(newW / W, MINBOX, 6);
       if (cfg.alwaysH || !keep || +t.h > 0) t.h = clampN(newH / H, MINBOX, 8); else t.h = 0;   // an image keeps "auto height" only while it is resized proportionally
-      setX((nL + nR) / 2 / W); setY((nT + nB) / 2 / H); guides(null, null);
+      setX((nL + nR) / 2 / W); setY((nT + nB) / 2 / H); guides(gv, gh);
     } else {
       let nx = clampN(x0 + dx / W, OUTMIN, OUTMAX), ny = clampN(y0 + dy / H, OUTMIN, OUTMAX), gv = null, gh = null;
       if (snapOn && !ev.altKey) {
         const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
         if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+        vl.push(...ol.vx); hl.push(...ol.hy);
         const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
         nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
@@ -1813,7 +1852,7 @@ imov.addEventListener('pointerdown', e => {
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
   const px0 = e.clientX, py0 = e.clientY, w0 = t.w, bh = el.offsetHeight;
-  const list = grpList(t), gc = grpCenter(list);
+  const list = grpList(t), gc = grpCenter(list), ol = objLines(el, new Set(list.map(m => m.id)));
   const gd0 = Math.hypot(e.clientX - R.left - gc.cx * W, e.clientY - R.top - gc.cy * H) || 1;
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
@@ -1829,6 +1868,7 @@ imov.addEventListener('pointerdown', e => {
       if (snapOn && !ev.altKey) {
         const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
         if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+        vl.push(...ol.vx); hl.push(...ol.hy);
         const a = snap1(nx, grpSpan(list.length, t.w) / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
         nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
@@ -1866,6 +1906,11 @@ function syncImg(t, light) {
   $('#irst').disabled = grouped || !(+t.h > 0);
   $('#ispd').disabled = grouped || !(sd || sv); $('#iscrnote').textContent = grouped ? 'Emoji groups have no scroll / position sliders (use Ungroup)' : (sd || sv) ? (sv ? 'Y' : 'X') + ' = starting point · you can also drag it in the preview' : '';
   if (light) return;
+  const a0 = t.emoji ? null : asset(t.asset), isv = !!a0?.vid, hasA = !!a0?.has_audio;   // video overlay sound
+  $('#isndg').hidden = !isv;
+  $('#imute').textContent = t.mute ? '🔇 Muted' : '🔊 Sound on'; $('#imute').classList.toggle('on', !t.mute); $('#imute').disabled = !hasA;
+  const vp = Math.round((t.vol ?? 1) * 100); $('#ivol').value = vp; $('#ivolv').textContent = vp + '%'; $('#ivol').disabled = !hasA || !!t.mute;
+  $('#isndnote').textContent = !isv ? '' : hasA ? 'This video\'s own sound. The main video\'s mute button does not affect it.' : 'This video has no sound (videos added before this update were saved without sound — upload it again to get its audio).';
   const n = grpList(t).length;
   $('#iname').textContent = imLabel(t) + (t.grp && n > 1 ? ` · group (${n})` : '');
   $('#iungrp').hidden = !(t.grp && n > 1);
@@ -1877,6 +1922,9 @@ $('#isize').oninput = e => editI('Image size', t => { const w = Math.max(0.03, +
 $('#iw').oninput = e => editI('Image width', t => { const w = clampN(+e.target.value / 100, MINBOX, 6); if (t.lock && +t.h > 0) t.h = clampN(t.h * w / t.w, MINBOX, 8); t.w = w; });
 $('#ih').oninput = e => editI('Image height', t => { const h = clampN(+e.target.value / 100, MINBOX, 8); if (t.lock) { t.w = clampN(t.w * h / imHf(t), MINBOX, 6); if (+t.h > 0) t.h = h; } else t.h = h; });
 $('#ilock').onchange = e => editI('Keep proportions', t => t.lock = e.target.checked);
+$('#imute').onclick = e => { editI('Video sound', t => t.mute = !t.mute); e.target.blur(); };
+$('#ivol').oninput = e => editI('Video volume', t => t.vol = clampN(+e.target.value / 100, 0, 2));
+$('#ivol').onchange = e => e.target.blur();
 $('#irst').onclick = e => { editI('Original ratio', t => { t.h = 0; }); e.target.blur(); };
 ['#iop', '#isize', '#iw', '#ih'].forEach(id => $(id).onchange = e => e.target.blur());
 $('#irad').oninput = e => editI('Image corner radius', t => t.rad = clampN(+e.target.value / 100, 0, 0.5));

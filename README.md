@@ -25,8 +25,10 @@ AegisX Editor is a lightweight, timeline-based video editor that runs entirely i
 | **Video** | Crop with aspect-ratio presets or free crop, speed control (0.25x to 8x), rounded corners on the cropped video, clip transitions (flash, zoom whoosh, shake, dip to black) |
 | **Canvas** | Original, 9:16, 16:9, 1:1, 4:5, 3:4, 4:3 or auto-fit to crop |
 | **Text** | Custom fonts, bold / italic / underline, outline, alignment, colors, drag and resize directly on the preview, scrolling ticker text (left / right, speed, opacity, X / Y position) |
-| **Images** | PNG, JPG, WebP and more with full transparency support, opacity, move, resize, rounded corners, scrolling logos (left / right, speed), timed overlays |
-| **Audio** | SFX and music libraries, per-item volume, shared across projects |
+| **Images & videos** | PNG, JPG, WebP and video overlays with transparency, opacity, **free move** (even partly off-canvas) and **free resize** (corner + side handles, `Shift` keeps proportions), rounded corners, scrolling logos, timed overlays |
+| **Shapes** | Rectangle (corner radius), circle / ellipse, triangle, diamond, pentagon, hexagon, star, heart, arrow, line — free resize, fill + stroke colors, opacity, timing |
+| **Layers** | One stacking order for text, images, videos, emoji and shapes. The **Layers** tab shows what is in front / behind — drag to reorder (exports exactly as previewed) |
+| **Audio** | SFX and music libraries, per-item volume, shared across projects. Overlay videos keep their own sound (own mute + volume); the main video's mute button does not affect them |
 | **Effects** | Grain, vintage, dust and glitch layers on the timeline, intensity 1% to 150% |
 | **Export** | 1080p, 720p or original size, fast or best-quality presets, one-click download |
 
@@ -40,7 +42,9 @@ AegisX Editor is a lightweight, timeline-based video editor that runs entirely i
 | `Delete` | Delete selected item |
 | `Ctrl` + `Z` | Undo |
 | `Ctrl` + `Shift` + `Z` or `Ctrl` + `Y` | Redo |
-| `Alt` (hold) | Temporarily disable snapping |
+| `Alt` (hold) | Temporarily disable snapping (items snap to the canvas, to each other and to the main video's edges / center, with guide lines) |
+| `Shift` (while resizing) | Keep proportions |
+| Arrow keys | Nudge the selected text / image / shape (`Shift` = bigger step) |
 
 ---
 
