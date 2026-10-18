@@ -55,7 +55,7 @@ main{flex:1;min-height:0;display:flex;padding:8px;gap:8px}
 #toast.show{opacity:1}
 
 /* ---- crop ---- */
-#cropov{position:absolute;inset:0;z-index:20;touch-action:none;cursor:default}
+#cropov{position:absolute;inset:0;z-index:6000;touch-action:none;cursor:default}
 #cbox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.62);cursor:move;touch-action:none}
 #cbox i{position:absolute;background:#fff6;pointer-events:none}
 #cbox .g1,#cbox .g2{top:0;bottom:0;width:1px}
@@ -80,7 +80,7 @@ button.ok{background:#2f8f5b}
 /* playhead drag knob + preview handles (clip select කළාම) */
 #head::before{content:"";position:absolute;top:0;left:-6px;width:14px;height:14px;background:#ff4d4d;border-radius:3px 3px 8px 8px}
 #track.nearhead,#track.nearhead *{cursor:ew-resize!important}
-#idleh{position:absolute;inset:0;z-index:15;pointer-events:none}
+#idleh{position:absolute;inset:0;z-index:4000;pointer-events:none}
 .ih{pointer-events:auto;opacity:.7}
 .ih:hover{opacity:1}
 
@@ -107,7 +107,7 @@ body:not(.home) #home{display:none}
 .pempty{grid-column:1/-1;color:#8b92a6;padding:40px 0;text-align:center}
 
 /* ---- text layers ---- */
-#txov{position:absolute;inset:0;z-index:12;pointer-events:none}
+#txov{position:absolute;inset:0;pointer-events:none}
 #txov[hidden]{display:none}
 .tx{position:absolute;pointer-events:auto;cursor:move;line-height:1.4;white-space:pre;user-select:none;-webkit-user-select:none;touch-action:none;transform:translate(-50%,-50%)}
 .tx .tt{display:block;paint-order:stroke fill}
@@ -116,7 +116,7 @@ body:not(.home) #home{display:none}
 .tx.sel .th{display:block}
 .th[data-h=tl]{left:2px;top:2px;cursor:nwse-resize}.th[data-h=tr]{right:2px;top:2px;cursor:nesw-resize}
 .th[data-h=bl]{left:2px;bottom:2px;cursor:nesw-resize}.th[data-h=br]{right:2px;bottom:2px;cursor:nwse-resize}
-.gl{position:absolute;z-index:13;pointer-events:none;background:#ff3df2}
+.gl{position:absolute;z-index:5000;pointer-events:none;background:#ff3df2}
 .gl.v{top:0;bottom:0;width:1px}.gl.h{left:0;right:0;height:1px}
 .gl.g{background:#ffd60a}
 #gridov{position:absolute;inset:0;z-index:11;pointer-events:none}
@@ -152,7 +152,7 @@ button.tog.on{background:#3b6fd8}
 #vvg{background:radial-gradient(ellipse at center,rgba(0,0,0,0) 48%,rgba(0,0,0,.72) 100%),rgba(110,70,25,.2)}
 
 /* ---- image overlay layers ---- */
-#imov{position:absolute;inset:0;z-index:12;pointer-events:none}
+#imov{position:absolute;inset:0;pointer-events:none}
 #imov[hidden]{display:none}
 .im{position:absolute;pointer-events:auto;cursor:move;user-select:none;-webkit-user-select:none;touch-action:none;transform:translate(-50%,-50%)}
 .im img{display:block;width:100%;height:auto;pointer-events:none;user-select:none;-webkit-user-drag:none}
@@ -412,3 +412,63 @@ header{display:flex;gap:14px;align-items:center;padding:0 16px;height:54px;flex:
 .cbgl{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#9aa4b8}
 #cbg{width:30px;height:24px;padding:0;border:1px solid #2b3142;border-radius:5px;background:none;cursor:pointer}
 #pfit.on{background:#3b6fd8}
+
+
+/* =====================================================================
+   v15 — layer order · free resize (corner + side handles) · shapes · layers panel
+   ===================================================================== */
+/* library tabs: 7 tabs → 4 per row */
+#libtabs{grid-template-columns:repeat(4,1fr)}
+#libtabs button{padding:5px 0 6px;font-size:11px}
+
+/* overlay containers: no stacking context (each item has its own z-index = 12 + layer rank) */
+#shov{position:absolute;inset:0;pointer-events:none}
+#shov[hidden]{display:none}
+
+/* resize handles: 4 corners + 4 sides (side handles = stretch one direction only) */
+.th[data-h=t],.th[data-h=b],.th[data-h=l],.th[data-h=r]{border-radius:3px}
+.th[data-h=t]{left:50%;top:-6px;margin-left:-5px;right:auto;cursor:ns-resize}
+.th[data-h=b]{left:50%;bottom:-6px;margin-left:-5px;right:auto;top:auto;cursor:ns-resize}
+.th[data-h=l]{top:50%;left:-6px;margin-top:-5px;bottom:auto;cursor:ew-resize}
+.th[data-h=r]{top:50%;right:-6px;margin-top:-5px;bottom:auto;left:auto;cursor:ew-resize}
+.th[data-h=t],.th[data-h=b]{width:18px;height:9px;margin-left:-9px}
+.th[data-h=l],.th[data-h=r]{width:9px;height:18px;margin-top:-9px}
+
+/* freely resized image / video: width and height are both set by the user */
+.im.free img,.im.free video{height:100%;object-fit:fill}
+
+/* shapes */
+.sp{position:absolute;pointer-events:auto;cursor:move;user-select:none;-webkit-user-select:none;touch-action:none;transform:translate(-50%,-50%)}
+.sp svg{display:block;width:100%;height:100%;overflow:visible;pointer-events:none}
+.sp.sel{outline:1.5px dashed #fff;outline-offset:2px;box-shadow:0 0 0 1px #0008}
+.sp .th{display:none;position:absolute;width:11px;height:11px;background:#fff;border-radius:50%;box-shadow:0 0 0 1px #0009;touch-action:none}
+.sp.sel .th{display:block}
+.sp .th[data-h=t],.sp .th[data-h=b]{width:18px;height:9px}
+.sp .th[data-h=l],.sp .th[data-h=r]{width:9px;height:18px}
+.shi{position:absolute;height:28px;background:#b8741f;border:1px solid #0d0f14;border-radius:5px;overflow:hidden;font-size:11px;padding:5px 8px;white-space:nowrap;cursor:grab;touch-action:none;box-shadow:inset 0 0 0 1px #ffffff1a}
+.shi.sel{outline:2px solid #e0a030}
+.shi::before,.shi::after{content:"";position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;background:#fff3}
+.shi::before{left:0}.shi::after{right:0}
+#shgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+#shgrid button{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 2px 6px;font-size:10.5px;color:var(--muted);min-width:0}
+#shgrid button svg{width:34px;height:34px;display:block;overflow:visible}
+#shgrid button:hover{color:var(--txt)}
+
+/* layers panel */
+#layers{position:relative;display:flex;flex-direction:column;gap:4px}
+.lrow{display:flex;align-items:center;gap:7px;padding:5px 6px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.lrow:hover{border-color:var(--line2);background:#232838}
+.lrow.sel{border-color:var(--accent);background:#4f86f520}
+.lrow.drag{opacity:.55;cursor:grabbing}
+.lrow.base{cursor:pointer;opacity:.8;border-style:dashed}
+.lrow .lh{color:#59627a;font-size:15px;line-height:1;width:12px;text-align:center;flex:none}
+.lrow.base .lh{visibility:hidden}
+.lrow .lth{width:28px;height:28px;flex:none;border-radius:6px;background:#10131a;border:1px solid var(--line);display:grid;place-items:center;overflow:hidden;font-weight:700;color:#c9cedc}
+.lrow .lth img{width:100%;height:100%;object-fit:contain;display:block}
+.lrow .lth svg{width:20px;height:20px;overflow:visible}
+.lrow .lmid{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.lrow .ln{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.lrow .lt{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.lrow .lb{padding:0 6px;font-size:11px;line-height:20px;border-radius:6px;flex:none}
+#ldrop{position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--accent);box-shadow:0 0 6px var(--accent);pointer-events:none;z-index:2}
+.lempty{color:var(--muted);font-size:12px;padding:6px 2px}

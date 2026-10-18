@@ -832,6 +832,35 @@ def sanitize_texts(raw, d: Path):
                     "x": clamp(t.get("x"), -2, 3, 0.5), "y": clamp(t.get("y"), 0, 1, 0.5),
                     "op": clamp(t.get("op"), 0, 1, 1),
                     "scr": scr_dir(t.get("scr")), "scv": scr_dir(t.get("scv")), "spd": clamp(t.get("spd"), 0.005, 3, 0.2),
+                    "z": clamp(t.get("z"), -1e6, 1e6, None),   # layer order (higher = in front)
+                    "start": s0, "end": max(s0 + 0.05, clamp(t.get("end"), 0, 36000, s0 + 3))})
+    return out
+
+
+def sanitize_shapes(raw, d: Path):
+    """shapes: browser එකේ export size එකෙන් draw කරපු PNG (preview එකටම සමානයි) -> temp files + overlay params"""
+    out = []
+    for t in (raw or [])[:60]:
+        if not isinstance(t, dict):
+            continue
+        png = t.get("png")
+        if not isinstance(png, str) or not png.startswith("data:image/png;base64,"):
+            continue
+        try:
+            data = base64.b64decode(png.split(",", 1)[1], validate=True)
+        except ValueError:
+            continue
+        if len(data) > 12 << 20 or not data.startswith(b"\x89PNG") or len(data) < 24:
+            continue
+        k = len(out)
+        path = d / f"shp_{k}.png"
+        path.write_bytes(data)
+        s0 = clamp(t.get("start"), 0, 36000, 0)
+        out.append({"path": path, "pw": struct.unpack(">I", data[16:20])[0], "ph": struct.unpack(">I", data[20:24])[0],
+                    "wf": clamp(t.get("wf"), 0.001, 8, 0.3), "hf": clamp(t.get("hf"), 0.001, 8, 0.3),
+                    "x": clamp(t.get("x"), -2, 3, 0.5), "y": clamp(t.get("y"), -2, 3, 0.5),
+                    "op": clamp(t.get("op"), 0, 1, 1),
+                    "z": clamp(t.get("z"), -1e6, 1e6, None),
                     "start": s0, "end": max(s0 + 0.05, clamp(t.get("end"), 0, 36000, s0 + 3))})
     return out
 
@@ -852,8 +881,10 @@ def sanitize_imgs(raw):
                 continue
         s0 = clamp(x.get("start"), 0, 36000, 0)
         d = clamp(x.get("dur"), 0.05, 36000, 3)
-        out.append({"path": p, "w": clamp(x.get("w"), 0.01, 4, 0.4),
-                    "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), 0, 1, 0.5),
+        out.append({"path": p, "w": clamp(x.get("w"), 0.01, 6, 0.4),
+                    "h": clamp(x.get("h"), 0, 8, 0),   # 0 = auto (file's own aspect ratio) · > 0 = freely resized height (fraction of canvas height)
+                    "x": clamp(x.get("x"), -2, 3, 0.5), "y": clamp(x.get("y"), -2, 3, 0.5),
+                    "z": clamp(x.get("z"), -1e6, 1e6, None),   # layer order (higher = in front)
                     "op": clamp(x.get("op"), 0, 1, 1), "rad": clamp(x.get("rad"), 0, 0.5, 0),
                     "scr": scr_dir(x.get("scr")), "scv": scr_dir(x.get("scv")), "spd": clamp(x.get("spd"), 0.005, 3, 0.2),
                     "vid": (not x.get("emoji")) and p.suffix.lower() in VID_EXT,
@@ -1025,7 +1056,7 @@ def ov_y(o):
         v = o["scv"] * o["spd"]
         return (f"y='-overlay_h+mod(main_h*({o['y']:.5f})+overlay_h/2+({v:.5f})*main_h*(t-{o['start']:.3f})"
                 f"+100000*(main_h+overlay_h),main_h+overlay_h)'")
-    return f"y=main_h*{o['y']:.5f}-overlay_h/2"
+    return f"y=main_h*({o['y']:.5f})-overlay_h/2"
 
 
 def atempo(s: float) -> str:
@@ -1037,7 +1068,7 @@ def atempo(s: float) -> str:
     return ",".join(f"atempo={p:.4f}" for p in parts)
 
 
-def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0, corners=None, bg="#000000"):
+def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, texts=None, tbase=0, fxs=None, imgs=None, ibase=0, corners=None, bg="#000000", shapes=None, sbase=0):
     chains, tags, n = [], "", len(clips)
     bgc = "0x" + bg.lstrip("#")
     T = "(on/30)"
@@ -1138,42 +1169,69 @@ def build_graph(clips, ow, oh, has_audio, sfx, music, total, sw=None, sh=None, t
     if fxs:   # FX: concat එකට පස්සේ, text වලට යටින්
         fg, vlabel = build_fx("[v]", fxs, ow, oh, total)
         chains.append(fg)
-    if texts or imgs:   # overlay සියල්ල 4:4:4 වලින් (chroma blur නැතුව), අන්තිමට එක පාරක් විතරක් 4:2:0
+    if texts or imgs or shapes:   # overlay සියල්ල 4:4:4 වලින් (chroma blur නැතුව), අන්තිමට එක පාරක් විතරක් 4:2:0
         chains.append(f"{vlabel}format=yuv444p[v444]")
         vlabel = "[v444]"
-    for k, im in enumerate(imgs or []):   # image overlays: FX වලට උඩින්, text වලට යටින්
-        w = max(2, round(im["w"] * ow))
-        opa = f",colorchannelmixer=aa={im['op']:.3f}" if im["op"] < 0.999 else ""
-        vpre = f"setpts=PTS-STARTPTS+{im['start']:.3f}/TB," if im.get("vid") else ""   # video overlay: timeline එකේ start time එකට shift
-        if im.get("mi") is not None:   # rounded corners: image alpha × rounded-rect mask
-            chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:{im['ph']}:flags=lanczos,split[ia{k}][ib{k}]")
-            chains.append(f"[ia{k}]alphaextract,format=gray[iaa{k}]")
-            chains.append(f"[{im['mi']}:v]format=gray[imk{k}]")
-            chains.append(f"[iaa{k}][imk{k}]blend=all_mode=multiply[ina{k}]")
-            chains.append(f"[ib{k}][ina{k}]alphamerge{opa}[im{k}]")
-        else:
-            chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:-1:flags=lanczos{opa}[im{k}]")
-        chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:{ov_y(im)}"
-                      f":enable='between(t,{im['start']:.3f},{im['end']:.3f})':format=auto[vi{k}]")
-        vlabel = f"[vi{k}]"
-    for k, t in enumerate(texts or []):   # text layers: concat එකට පස්සේ overlay (flash/transition වලට උඩින්)
-        w = max(2, round(t["wf"] * ow))
-        fl = ["format=rgba"]
-        if abs(w - (t.get("pw") or 0)) > 1:   # size එක ගැලපෙනවා නම් resample නෑ (1:1 pixels = තියුණුම)
-            fl.append(f"scale={w}:-1:flags=lanczos")
-        if t.get("op", 1) < 0.999:
-            fl.append(f"colorchannelmixer=aa={t['op']:.3f}")
-        chains.append(f"[{tbase + k}:v]" + ",".join(fl) + f"[tx{k}]")
-        chains.append(f"{vlabel}[tx{k}]overlay={ov_x(t)}:{ov_y(t)}"
-                      f":enable='between(t,{t['start']:.3f},{t['end']:.3f})':format=auto[vt{k}]")
-        vlabel = f"[vt{k}]"
-    if texts or imgs:
+    # overlay layers (image / video / emoji, shapes, text): FX වලට උඩින්, user දාපු layer order (z) එකට යටින් → උඩට.
+    # z නැති පරණ projects: images < shapes < text (කලින් වගේම)
+    ovs = []
+    for k, im in enumerate(imgs or []):
+        ovs.append((im["z"] if im.get("z") is not None else -3e6 + k, 0, k, "img", im))
+    for k, sp_ in enumerate(shapes or []):
+        ovs.append((sp_["z"] if sp_.get("z") is not None else -2e6 + k, 1, k, "shp", sp_))
+    for k, t in enumerate(texts or []):
+        ovs.append((t["z"] if t.get("z") is not None else -1e6 + k, 2, k, "txt", t))
+    ovs.sort(key=lambda o: o[:3])
+    for _z, _r, k, kind, o in ovs:
+        if kind == "img":
+            im = o
+            w = max(2, round(im["w"] * ow))
+            opa = f",colorchannelmixer=aa={im['op']:.3f}" if im["op"] < 0.999 else ""
+            vpre = f"setpts=PTS-STARTPTS+{im['start']:.3f}/TB," if im.get("vid") else ""   # video overlay: timeline එකේ start time එකට shift
+            # free resize: h > 0 → width × height දෙකම user දීපු ගාණට (aspect ratio නොසලකා) · h = 0 → file එකේ aspect ratio එකම
+            hsc = str(max(2, round(im["h"] * oh))) if im.get("h") else "-1"
+            if im.get("mi") is not None:   # rounded corners: image alpha × rounded-rect mask
+                chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:{im['ph']}:flags=lanczos,split[ia{k}][ib{k}]")
+                chains.append(f"[ia{k}]alphaextract,format=gray[iaa{k}]")
+                chains.append(f"[{im['mi']}:v]format=gray[imk{k}]")
+                chains.append(f"[iaa{k}][imk{k}]blend=all_mode=multiply[ina{k}]")
+                chains.append(f"[ib{k}][ina{k}]alphamerge{opa}[im{k}]")
+            else:
+                chains.append(f"[{ibase + k}:v]{vpre}format=rgba,scale={w}:{hsc}:flags=lanczos{opa}[im{k}]")
+            chains.append(f"{vlabel}[im{k}]overlay={ov_x(im)}:{ov_y(im)}"
+                          f":enable='between(t,{im['start']:.3f},{im['end']:.3f})':format=auto[vi{k}]")
+            vlabel = f"[vi{k}]"
+        elif kind == "shp":
+            s2 = o
+            w, h = max(2, round(s2["wf"] * ow)), max(2, round(s2["hf"] * oh))
+            fl = ["format=rgba"]
+            if abs(w - s2["pw"]) > 1 or abs(h - s2["ph"]) > 1:   # size එක ගැලපෙනවා නම් resample නෑ (1:1 pixels = තියුණුම)
+                fl.append(f"scale={w}:{h}:flags=lanczos")
+            if s2["op"] < 0.999:
+                fl.append(f"colorchannelmixer=aa={s2['op']:.3f}")
+            chains.append(f"[{sbase + k}:v]" + ",".join(fl) + f"[sh{k}]")
+            chains.append(f"{vlabel}[sh{k}]overlay={ov_x(s2)}:{ov_y(s2)}"
+                          f":enable='between(t,{s2['start']:.3f},{s2['end']:.3f})':format=auto[vs{k}]")
+            vlabel = f"[vs{k}]"
+        else:   # text layers: concat එකට පස්සේ overlay (flash/transition වලට උඩින්)
+            t = o
+            w = max(2, round(t["wf"] * ow))
+            fl = ["format=rgba"]
+            if abs(w - (t.get("pw") or 0)) > 1:   # size එක ගැලපෙනවා නම් resample නෑ (1:1 pixels = තියුණුම)
+                fl.append(f"scale={w}:-1:flags=lanczos")
+            if t.get("op", 1) < 0.999:
+                fl.append(f"colorchannelmixer=aa={t['op']:.3f}")
+            chains.append(f"[{tbase + k}:v]" + ",".join(fl) + f"[tx{k}]")
+            chains.append(f"{vlabel}[tx{k}]overlay={ov_x(t)}:{ov_y(t)}"
+                          f":enable='between(t,{t['start']:.3f},{t['end']:.3f})':format=auto[vt{k}]")
+            vlabel = f"[vt{k}]"
+    if texts or imgs or shapes:
         chains.append(f"{vlabel}format=yuv420p[vout]")
         vlabel = "[vout]"
     return ";".join(chains), label, vlabel
 
 
-def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None, mute: bool = False, bgcol: str = "#000000"):
+def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str = "auto", texts=None, fxs=None, imgs=None, mute: bool = False, bgcol: str = "#000000", shapes=None):
     d = DATA / pid
     job = JOBS[pid]
     with ffmpeg_lock:
@@ -1200,10 +1258,12 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
             tbase = 1 + len(sfx) + (1 if music else 0)
             fxs = [dict(f, end=min(f["end"], total)) for f in (fxs or []) if f["start"] < total - 0.05]
             imgs = imgs or []
+            shapes = shapes or []
             ibase = tbase + len(texts)
+            sbase = ibase + len(imgs)
             # rounded corners: extra PNG inputs (clip corner cutouts + image masks)
             extra, corners = [], {}
-            nxt = ibase + len(imgs)
+            nxt = sbase + len(shapes)
             for i, c in enumerate(clips):
                 if c.get("rad", 0) > 0.002:
                     rw, rh = region_px(c, ow, oh, sw0, sh0)
@@ -1218,14 +1278,14 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                     if not pi["width"] or not pi["height"]:
                         continue
                     w = max(2, round(im["w"] * ow))
-                    h = max(2, round(w * pi["height"] / pi["width"]))
+                    h = max(2, round(im["h"] * oh)) if im.get("h") else max(2, round(w * pi["height"] / pi["width"]))
                     R = max(1, round(im["rad"] * min(w, h)))
                     mp = d / f"mask_{k}.png"
                     mask_png(mp, w, h, R)
                     im["mi"], im["ph"] = nxt + len(extra), h
                     extra.append(mp)
             has_audio = bool(info["has_audio"]) and not mute   # mute = main video එකේ sound එක අයින් (SFX / music ඉතිරියි)
-            graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners, bgcol)
+            graph, label, vlabel = build_graph(clips, ow, oh, has_audio, sfx, music, total, sw0, sh0, texts, tbase, fxs, imgs, ibase, corners, bgcol, shapes, sbase)
             tmp = d / "output_tmp.mp4"
             cmd = [FFMPEG, "-y", "-i", str(src)]
             for x in sfx:
@@ -1239,6 +1299,8 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
                     cmd += ["-stream_loop", "-1", "-t", f"{im['end'] - im['start']:.3f}", "-i", str(im["path"])]
                 else:
                     cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(im["path"])]
+            for shp in shapes:
+                cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(shp["path"])]
             for ep_ in extra:
                 cmd += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", str(ep_)]
             cmd += ["-filter_complex", graph, "-map", vlabel]
@@ -1265,7 +1327,7 @@ def run_export(pid: str, clips, sfx, music, width: int, preset: str, canvas: str
         except Exception as e:
             job.update(status="error", error=str(e))
         finally:
-            for pat in ("txt_*.png", "corner_*.png", "mask_*.png"):
+            for pat in ("txt_*.png", "shp_*.png", "corner_*.png", "mask_*.png"):
                 for f in d.glob(pat):
                     f.unlink(missing_ok=True)
 
@@ -1300,15 +1362,19 @@ async def start_export(pid: str, request: Request, bg: BackgroundTasks):
     raw_imgs = body.get("imgs")
     if isinstance(raw_imgs, list) and len(raw_imgs) <= 100 and all(isinstance(x, dict) for x in raw_imgs):
         ed["imgs"] = raw_imgs
+    raw_sdefs = body.get("shapeDefs")   # shape definitions (edit.json) — "shapes" = export render PNGs
+    if isinstance(raw_sdefs, list) and len(raw_sdefs) <= 100 and all(isinstance(x, dict) for x in raw_sdefs):
+        ed["shapes"] = raw_sdefs
     ep.write_text(json.dumps(ed))
     fxs = sanitize_fxs(raw_fxs)
     imgs = sanitize_imgs(raw_imgs)
     texts = sanitize_texts(body.get("texts"), d)
+    shapes = sanitize_shapes(body.get("shapes"), d)
     width = int(body.get("width") or 0)
     width = width if 240 <= width <= 4320 else 0
     preset = body.get("preset") if body.get("preset") in ("veryfast", "medium") else "veryfast"
     JOBS[pid] = {"status": "queued", "progress": 0, "error": ""}
-    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs, mute, bgcol)
+    bg.add_task(run_export, pid, clips, sfx, music, width, preset, canvas, texts, fxs, imgs, mute, bgcol, shapes)
     return JOBS[pid]
 
 

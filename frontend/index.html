@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AegisX Editor</title>
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 <header>
@@ -45,10 +45,12 @@
   <aside id="lib">
     <nav id="libtabs">
       <button data-tab="text" class="on" title="Text layers"><i>T</i>Text</button>
-      <button data-tab="media" title="Images and logos"><i>🖼</i>Media</button>
+      <button data-tab="media" title="Images, logos and videos"><i>🖼</i>Media</button>
+      <button data-tab="shapes" title="Shapes (free resize, colors)"><i>◆</i>Shapes</button>
       <button data-tab="emoji" title="Emoji"><i>😀</i>Emoji</button>
       <button data-tab="fx" title="Video effects"><i>✨</i>FX</button>
       <button data-tab="audio" title="Sound effects and music"><i>🎵</i>Audio</button>
+      <button data-tab="layers" title="Layers: what is in front / behind (drag to reorder)"><i>☰</i>Layers</button>
     </nav>
     <div id="libbody">
       <section class="tab" data-tab="text">
@@ -62,7 +64,17 @@
       <section class="tab" data-tab="media" hidden>
         <h4>Images &amp; videos <label class="btn sm">＋ Upload<input id="up-img" type="file" accept="image/*,video/*" multiple hidden></label></h4>
         <div id="lib-img"></div>
-        <p class="hint">Upload images <b>or videos</b> (mp4 / mov / webm — a video overlay plays without its own sound and loops to fill the time you give it). ＋ adds it at the playhead · ⇠ adds it as a scrolling logo (set the direction in the inspector). Drag in the preview to move, drag a corner to resize. Items snap magnetically on the timeline.</p>
+        <p class="hint">Upload images <b>or videos</b> (mp4 / mov / webm — a video overlay plays without its own sound and loops to fill the time you give it). ＋ adds it at the playhead · ⇠ adds it as a scrolling logo (set the direction in the inspector). Drag in the preview to move it anywhere, drag any <b>corner or side handle</b> to resize freely (hold <b>Shift</b> to keep the proportions). Items snap magnetically on the timeline.</p>
+      </section>
+      <section class="tab" data-tab="shapes" hidden>
+        <h4>Shapes</h4>
+        <div id="shgrid"></div>
+        <p class="hint">Click a shape to add it at the playhead. Drag it in the preview to move it anywhere; drag any <b>corner</b> or <b>side handle</b> to resize it freely (hold <b>Shift</b> to keep the proportions). Choose the fill / stroke colors, opacity and corner radius in the Properties panel. Use the <b>Layers</b> tab to put it in front of / behind other items.</p>
+      </section>
+      <section class="tab" data-tab="layers" hidden>
+        <h4>Layers <span class="hint">top = in front</span></h4>
+        <div id="layers"></div>
+        <p class="hint">Every text, image, video, emoji and shape is a layer. <b>Drag a layer up or down</b> to change what is in front of what (the main video is always at the bottom). Click a layer to select it · ▲ ▼ move it one step.</p>
       </section>
       <section class="tab" data-tab="emoji" hidden>
         <h4>Emoji <span class="hint">Apple style</span></h4>
@@ -89,7 +101,7 @@
 
   <!-- ===== center: preview ===== -->
   <section id="sw"><div id="stage"><div id="zw"><video id="video" playsinline preload="auto"></video></div><div id="fx"></div><div id="vvg"></div><div id="vgr"></div><canvas id="vdu"></canvas><canvas id="vgl"></canvas>
-    <div id="gridov" hidden></div><div id="imov"></div><div id="txov"></div><div class="gl v" id="gv" hidden></div><div class="gl h" id="gh" hidden></div>
+    <div id="gridov" hidden></div><div id="imov"></div><div id="shov"></div><div id="txov"></div><div class="gl v" id="gv" hidden></div><div class="gl h" id="gh" hidden></div>
     <div id="cropov" hidden><div id="cbox"><i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i>
       <b class="hd" data-h="tl"></b><b class="hd" data-h="t"></b><b class="hd" data-h="tr"></b><b class="hd" data-h="r"></b>
       <b class="hd" data-h="br"></b><b class="hd" data-h="b"></b><b class="hd" data-h="bl"></b><b class="hd" data-h="l"></b>
@@ -216,6 +228,10 @@
             </div>
             <span class="btnrow"><button id="twhole" title="Show the text for the whole video (0s → end)">Whole video</button><button id="tfit" title="Text ends where the video ends">⇥ Video end</button><button id="tend" title="Text ends at the playhead">⇥ Playhead</button></span>
           </div>
+          <div class="ig">
+            <b>Layer order</b>
+            <span class="btnrow"><button data-lay="front" title="Bring to front">⤒ Front</button><button data-lay="up" title="One step forward">▲ Forward</button><button data-lay="down" title="One step backward">▼ Backward</button><button data-lay="back" title="Send to back (just above the main video)">⤓ Back</button></span>
+          </div>
           <div class="ig actions"><button id="tdup">Duplicate</button><button id="tdel" class="danger">Delete text</button></div>
         </div>
 
@@ -223,7 +239,12 @@
           <div class="ig">
             <b>Image: <span id="iname"></span></b>
             <label>Opacity <input id="iop" type="range" min="0" max="100" step="1" value="100"> <span id="iopv" class="v"></span></label>
-            <label>Size <input id="isize" type="range" min="3" max="200" step="1" value="40"> <span id="isizev" class="v"></span></label>
+            <label title="Scale the whole item (keeps its current proportions)">Size <input id="isize" type="range" min="3" max="200" step="1" value="40"> <span id="isizev" class="v"></span></label>
+            <label title="Width as % of the canvas width">Width <input id="iw" type="range" min="2" max="300" step="1" value="40"> <span id="iwv" class="v"></span></label>
+            <label title="Height as % of the canvas height">Height <input id="ih" type="range" min="2" max="300" step="1" value="40"> <span id="ihv" class="v"></span></label>
+            <label class="chk" title="When on, width and height change together"><input type="checkbox" id="ilock"> Keep proportions</label>
+            <span class="btnrow"><button id="irst" title="Go back to the file's own proportions">↺ Original ratio</button></span>
+            <span class="hint" id="ifreenote">Drag any <b>corner</b> or <b>side</b> handle in the preview to resize freely · hold <b>Shift</b> to keep the proportions.</span>
             <label title="Round the corners of the image">Corner radius <input id="irad" type="range" min="0" max="50" step="1" value="0"> <span id="iradv" class="v"></span></label>
           </div>
           <div class="ig">
@@ -246,7 +267,49 @@
             </div>
             <span class="btnrow"><button id="iwhole" title="Show the image for the whole video (0s → end)">Whole video</button><button id="ifit" title="Image ends where the video ends">⇥ Video end</button><button id="iend" title="Image ends at the playhead">⇥ Playhead</button></span>
           </div>
+          <div class="ig">
+            <b>Layer order</b>
+            <span class="btnrow"><button data-lay="front" title="Bring to front">⤒ Front</button><button data-lay="up" title="One step forward">▲ Forward</button><button data-lay="down" title="One step backward">▼ Backward</button><button data-lay="back" title="Send to back (just above the main video)">⤓ Back</button></span>
+          </div>
           <div class="ig actions"><button id="idup">Duplicate</button><button id="iungrp" hidden>Ungroup</button><button id="idel" class="danger">Delete image</button></div>
+        </div>
+
+        <div class="ig col" id="i-shape" hidden>
+          <div class="ig">
+            <b>Shape</b>
+            <label>Type <select id="shtype"></select></label>
+            <b style="margin-top:4px">Fill</b>
+            <div class="swrow cs" id="shfill"></div>
+            <label>Fill opacity <input id="shfop" type="range" min="0" max="100" step="1" value="100"> <span id="shfopv" class="v"></span></label>
+            <b style="margin-top:4px">Stroke (outline)</b>
+            <div class="swrow cs" id="shsc"></div>
+            <label>Stroke <input id="shsw" type="range" min="0" max="100" step="1" value="0"> <span id="shswv" class="v"></span></label>
+            <label title="Only for rectangles">Corner radius <input id="shrad" type="range" min="0" max="50" step="1" value="0"> <span id="shradv" class="v"></span></label>
+            <label>Opacity <input id="shop" type="range" min="0" max="100" step="1" value="100"> <span id="shopv" class="v"></span></label>
+          </div>
+          <div class="ig">
+            <b>Size &amp; position</b>
+            <p class="hint">Drag the shape to move it, drag any <b>corner / side</b> handle to resize freely (<b>Shift</b> = keep proportions).</p>
+            <label title="Width as % of the canvas width">Width <input id="shw" type="range" min="2" max="300" step="1" value="30"> <span id="shwv" class="v"></span></label>
+            <label title="Height as % of the canvas height">Height <input id="shh" type="range" min="2" max="300" step="1" value="30"> <span id="shhv" class="v"></span></label>
+            <label class="chk"><input type="checkbox" id="shlock"> Keep proportions</label>
+            <label>X <input id="shpx" type="range" min="-30" max="130" step="0.5"> <span id="shpxv" class="v"></span></label>
+            <label>Y <input id="shpy" type="range" min="-30" max="130" step="0.5"> <span id="shpyv" class="v"></span></label>
+            <span class="btnrow"><button id="shcx" title="Horizontal center">⇔ Center X</button><button id="shcy" title="Vertical center">⇕ Center Y</button><button id="shsq" title="Make width = height in pixels">▢ Make square</button></span>
+          </div>
+          <div class="ig">
+            <b>Timing</b>
+            <div class="two">
+              <label>Start (s) <input id="shstart" type="number" min="0" step="0.1"></label>
+              <label>Duration (s) <input id="shdur" type="number" min="0.2" step="0.1"></label>
+            </div>
+            <span class="btnrow"><button id="shwhole" title="Show the shape for the whole video (0s → end)">Whole video</button><button id="shfit" title="Shape ends where the video ends">⇥ Video end</button><button id="shend" title="Shape ends at the playhead">⇥ Playhead</button></span>
+          </div>
+          <div class="ig">
+            <b>Layer order</b>
+            <span class="btnrow"><button data-lay="front" title="Bring to front">⤒ Front</button><button data-lay="up" title="One step forward">▲ Forward</button><button data-lay="down" title="One step backward">▼ Backward</button><button data-lay="back" title="Send to back (just above the main video)">⤓ Back</button></span>
+          </div>
+          <div class="ig actions"><button id="shdup">Duplicate</button><button id="shdel" class="danger">Delete shape</button></div>
         </div>
 
         <div class="ig col" id="i-sfx" hidden>
@@ -314,6 +377,7 @@
       <div class="lane" style="top:104px;height:34px"><span>Music</span></div>
       <div class="lane" id="txlane" style="top:142px;height:34px"><span>Text</span></div>
       <div class="lane" id="imlane" style="top:178px;height:34px"><span>Image</span></div>
+      <div class="lane" id="shlane" style="top:178px;height:34px"><span>Shape</span></div>
       <div class="lane" id="fxlane" style="top:178px;height:34px"><span>FX</span></div>
       <div id="dropline" hidden></div>
       <div id="head"></div>
@@ -321,6 +385,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

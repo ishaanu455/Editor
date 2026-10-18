@@ -1,8 +1,8 @@
 const $ = s => document.querySelector(s);
 const video = $('#video'), track = $('#track'), tl = $('#tl'), stage = $('#stage');
 const zw = $('#zw'), fxEl = $('#fx');
-let pid = null, meta = null, clips = [], sfx = [], music = null, assets = [], texts = [], fonts = [], fxs = [], imgs = [];
-let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, selImg = null, cur = 0, head = 0, playing = false, pps = 40;
+let pid = null, meta = null, clips = [], sfx = [], music = null, assets = [], texts = [], fonts = [], fxs = [], imgs = [], shapes = [];
+let sel = -1, selSfx = null, selMusic = false, selText = null, selFx = null, selImg = null, selShape = null, cur = 0, head = 0, playing = false, pps = 40;
 let undo = [], redo = [], saveT = null, gesture = false, zkey = '', swallow = false;
 let linked = true, mute = false;   // linked = main item delete කරන්න බෑ · mute = main video sound off
 let dirty = false, uiT = null, openTok = 0;   // dirty = save කරන්න තියෙන edit; openTok = project switch token
@@ -19,7 +19,7 @@ const spToSl = v => 100 * Math.log(Math.max(SPMIN, Math.min(SPMAX, v)) / SPMIN) 
 const slToSp = v => { const x = SPMIN * Math.pow(SPMAX / SPMIN, v / 100); return Math.max(SPMIN, Math.min(SPMAX, x < 2 ? Math.round(x * 20) / 20 : Math.round(x * 4) / 4)); };
 const len = c => (c.end - c.start) / sp(c);
 // main track එක හිස් (main delete කරලා) නම් timeline එකේ දිග = ඉතිරි items වල අන්තිම කෙළවර (ඒවගේ duration වෙනස් වෙන්නේ නෑ)
-const ghostLen = () => Math.max(0, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
+const ghostLen = () => Math.max(0, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...shapes.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
 const total = () => clips.length ? clips.reduce((a, c) => a + len(c), 0) : ghostLen();
 const offsets = () => { let o = 0; return clips.map(c => { const r = o; o += len(c); return r; }); };
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
@@ -28,7 +28,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const asset = id => assets.find(a => a.id === id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const clearSel = () => { sel = -1; selSfx = null; selMusic = false; selText = null; selFx = null; selImg = null; };
+const clearSel = () => { sel = -1; selSfx = null; selMusic = false; selText = null; selFx = null; selImg = null; selShape = null; };
 
 // ---- scroll (ticker): text / image canvas එක හරහා ගමන් කරලා අනිත් පැත්තෙන් ආපහු එනවා (export එකේ backend ov_x() එකම formula) ----
 // t.x = item එකේ පටන් ගන්න තැන (center, 0..1) · t.scr = -1 වමට / 1 දකුණට / 0 නැහැ · t.spd = canvas width එකෙන් තත්පරයකට කීයද
@@ -42,7 +42,8 @@ const scrV = t => +t.scv || 0;
 const isScr = t => !!(scrDir(t) || scrV(t));
 const scrOffY = t => scrV(t) * (t.spd || 0.2) * scrU(t);
 const dispY = (t, h) => scrV(t) ? wrapX(t.y + scrOffY(t), h) : t.y;
-const imHf = t => { const a = t.emoji ? null : asset(t.asset), ar = a?.w && a?.h ? a.w / a.h : 1; return t.w * (stage.clientWidth || 1) / ar / (stage.clientHeight || 1); };
+// image / video height as a fraction of the canvas height: h > 0 = freely resized by the user · else derived from the file's own aspect ratio
+const imHf = t => { if (+t.h > 0) return +t.h; const a = t.emoji ? null : asset(t.asset), ar = a?.w && a?.h ? a.w / a.h : 1; return t.w * (stage.clientWidth || 1) / ar / (stage.clientHeight || 1); };
 
 // ================= audio engine (SFX + music preview) =================
 let ac = null, live = [], prev = null;
@@ -165,7 +166,7 @@ function updateStage() {   // preview stage එක canvas ratio එකට (avail
   if (!bw || !bh) return;
   const w = Math.min(bw, bh * a), h = w / a;
   stage.style.width = w + 'px'; stage.style.height = h + 'px';
-  renderText(); renderImgs();
+  renderText(); renderImgs(); renderShapes();
 }
 new ResizeObserver(updateStage).observe($('#sw'));   // layout / window වෙනස් වුනාම stage එක refit
 // crop box + zoom එකෙන් සැබෑවටම පෙන්නන source region එක (backend එකේ crop → zoom crop ඒකම)
@@ -227,12 +228,12 @@ function tick() {
     head = offsets()[cur] + Math.max(0, (video.currentTime - k.start) / sp(k));
     $('#head').style.left = head * pps + 'px';
     $('#time').textContent = `${fmt(head)} / ${fmt(total())}`;
-    applyFx(); applyText(); applyImg();
+    applyFx(); applyText(); applyImg(); applyShapes();
     try { applyVfx(); } catch (err) { console.warn('fx preview', err); }
   } else if (pid) {   // main නැත: playhead + overlays විතරක් update
     $('#head').style.left = head * pps + 'px';
     $('#time').textContent = `${fmt(head)} / ${fmt(total())}`;
-    applyFx(); applyText(); applyImg();
+    applyFx(); applyText(); applyImg(); applyShapes();
     try { applyVfx(); } catch {}
   }
   requestAnimationFrame(tick);
@@ -241,8 +242,9 @@ function tick() {
 // ================= render =================
 function syncInsp() {
   if (cropMode && sel !== cropIdx) exitCrop();
-  const c = clips[sel], s = sfx.find(x => x.id === selSfx), m = selMusic && music, tx = curText(), fx = curFx(), im = curImg();
-  $('#insp').hidden = !(c || s || m || tx || fx || im);
+  const c = clips[sel], s = sfx.find(x => x.id === selSfx), m = selMusic && music, tx = curText(), fx = curFx(), im = curImg(), shp = curShape();
+  $('#insp').hidden = !(c || s || m || tx || fx || im || shp);
+  $('#i-shape').hidden = !shp; if (shp) syncShape(shp);
   $('#i-text').hidden = !tx; if (tx) syncText(tx);
   $('#i-fx').hidden = !fx; if (fx) syncFx(fx);
   $('#i-img').hidden = !im; if (im) syncImg(im);
@@ -280,7 +282,8 @@ function syncInsp() {
 
 function render() {
   updateStage(); $('#canvas').value = canvas; stage.style.background = canvasBg; $('#cbg').value = canvasBg;
-  track.querySelectorAll('.clip,.sfx,.music,.tmark,.txi,.fxi,.imi,.mainph').forEach(e => e.remove());
+  normZ();   // layer order (z) → 0..n-1
+  track.querySelectorAll('.clip,.sfx,.music,.tmark,.txi,.fxi,.imi,.shi,.mainph').forEach(e => e.remove());
   video.style.visibility = clips.length ? '' : 'hidden'; video.muted = mute; syncMainBtns();
   const off = offsets(), T = total();
   const add = (cls, css, text) => {
@@ -327,7 +330,16 @@ function render() {
   });
   const ni = Math.max(1, imRows.length);
   $('#imlane').style.top = imTop - 2 + 'px'; $('#imlane').style.height = ni * 32 + 2 + 'px';
-  const fxTop = imTop + ni * 32 + 4, fxRows = [];   // FX lane: image rows වලට යටින්
+  const shTop = imTop + ni * 32 + 4, shRows = [];   // Shape lane: image rows වලට යටින්
+  [...shapes].sort((a, b) => a.start - b.start).forEach(t => {
+    let rw = shRows.findIndex(e => e <= t.start + 1e-6); if (rw < 0) { rw = shRows.length; shRows.push(0); }
+    shRows[rw] = t.start + t.dur;
+    add('shi' + (t.id === selShape ? ' sel' : ''), { left: t.start * pps + 'px', width: Math.max(18, t.dur * pps) + 'px', top: shTop + rw * 32 + 'px' },
+      '◆ ' + (SHAPES[t.type] || t.type) + ' · ' + Math.round(t.op * 100) + '%').dataset.id = t.id;
+  });
+  const nsh = Math.max(1, shRows.length);
+  $('#shlane').style.top = shTop - 2 + 'px'; $('#shlane').style.height = nsh * 32 + 2 + 'px';
+  const fxTop = shTop + nsh * 32 + 4, fxRows = [];   // FX lane: shape rows වලට යටින්
   [...fxs].sort((a, b) => a.start - b.start).forEach(f => {
     let rw = fxRows.findIndex(e => e <= f.start + 1e-6); if (rw < 0) { rw = fxRows.length; fxRows.push(0); }
     fxRows[rw] = f.start + f.dur;
@@ -338,14 +350,14 @@ function render() {
   const nf = Math.max(1, fxRows.length);
   $('#fxlane').style.top = fxTop - 2 + 'px'; $('#fxlane').style.height = nf * 32 + 2 + 'px';
   track.style.height = fxTop + nf * 32 + 4 + 'px'; tl.style.height = 'auto';   // උස track එකෙන් (scrollbar එකත් එක්ක) → උඩ/පහළ scroll නෑ
-  const end = Math.max(T, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
+  const end = Math.max(T, ...sfx.map(s => s.t + (asset(s.asset)?.duration || 1)), ...texts.map(t => t.start + t.dur), ...imgs.map(t => t.start + t.dur), ...shapes.map(t => t.start + t.dur), ...fxs.map(f => f.start + f.dur));
   track.style.width = Math.max(end * pps + 80, tl.clientWidth) + 'px';
-  syncInsp(); renderText(); renderImgs();
+  syncInsp(); renderText(); renderImgs(); renderShapes(); renderLayers();
 }
 
 // ================= state / undo / save =================
-const state = () => JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, linked, mute });
-function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; canvasBg = o.bg || '#000000'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; linked = o.linked !== false; mute = !!o.mute; }
+const state = () => JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, shapes, linked, mute });
+function setState(s) { const o = JSON.parse(s); clips = o.clips; sfx = o.sfx; music = o.music; canvas = o.canvas || 'auto'; canvasBg = o.bg || '#000000'; texts = o.texts || []; fxs = o.fxs || []; imgs = o.imgs || []; shapes = o.shapes || []; linked = o.linked !== false; mute = !!o.mute; }
 function snap(label = 'Edit') { undo.push({ s: state(), label }); redo = []; if (undo.length > 100) undo.shift(); updUndoUi(); }
 let toastT = null;
 function toast(msg) {
@@ -365,7 +377,7 @@ function save() {   // edit (clips/sfx/music/canvas) -> edit.json. keepalive: ta
   if (!pid || !dirty) return;
   dirty = false;
   fetch(`/api/projects/${pid}/edit`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, keepalive: true,
-    body: JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, linked, mute, noMain: !clips.length }) });
+    body: JSON.stringify({ clips, sfx, music, canvas, bg: canvasBg, texts, fxs, imgs, shapes, linked, mute, noMain: !clips.length }) });
 }
 function saveUi() {   // playhead / timeline zoom / export settings -> ui.json ("last edited" වෙලාව වෙනස් කරන්නේ නෑ)
   clearTimeout(uiT);
@@ -435,6 +447,7 @@ function tlPoints(o = {}, exceptId = null, exceptGrp = '') {
   texts.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
   fxs.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
   imgs.forEach(x => { if (x.id !== exceptId && !(exceptGrp && x.grp === exceptGrp)) pts.push(x.start, x.start + x.dur); });
+  shapes.forEach(x => { if (x.id !== exceptId) pts.push(x.start, x.start + x.dur); });
   sfx.forEach(x => { if (x.id !== exceptId) pts.push(x.t, x.t + (asset(x.asset)?.duration || 0)); });
   return pts;
 }
@@ -710,7 +723,7 @@ function startPlaceResize(e, h, hd) {
 }
 // video එක preview එකේ ඇදලා move (magnetic: canvas center / edges / grid)
 stage.addEventListener('pointerdown', e => {
-  if (cropMode || e.button || !clips.length || e.target.closest('.tx, .im, .hd, #cropov')) return;
+  if (cropMode || e.button || !clips.length || e.target.closest('.tx, .im, .sp, .hd, #cropov')) return;
   if (sel !== cur || sel < 0) { const i = tlToClip(head).i; clearSel(); sel = i; render(); }
   const c = clips[sel]; if (!c) return;
   e.preventDefault();
@@ -837,12 +850,17 @@ $('#sdel').onclick = delSfx;
 $('#mdel').onclick = () => { snap('Remove music'); music = null; selMusic = false; changed(); };
 
 $('#play').onclick = toggle; $('#split').onclick = split;
-$('#del').onclick = () => selFx ? delFx() : selImg ? delImg() : selText ? delText() : selSfx ? delSfx() : del();
+$('#del').onclick = () => selFx ? delFx() : selImg ? delImg() : selShape ? delShape() : selText ? delText() : selSfx ? delSfx() : del();
 $('#undo').onclick = () => undoRedo(undo, redo, 'Undo'); $('#redo').onclick = () => undoRedo(redo, undo, 'Redo');
 $('#canvas').onchange = e => { snap('Canvas ratio'); canvas = e.target.value; zkey = ''; changed(); e.target.blur(); };
 $('#tzoom').oninput = e => { pps = +e.target.value; render(); touchUi(); };
 $('#xres').onchange = touchUi; $('#xpreset').onchange = touchUi;
 
+function nudge(e) {   // arrow keys = move the selected overlay by 0.5% (Shift = 2%)
+  const o = selItem(); if (!o) return false;
+  const st = e.shiftKey ? 0.02 : 0.005, dx = e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, dy = e.key === 'ArrowUp' ? -st : e.key === 'ArrowDown' ? st : 0;
+  snapT('Nudge'); (o.grp ? grpList(o) : [o]).forEach(m => { m.x = +(m.x + dx).toFixed(5); m.y = +(m.y + dy).toFixed(5); }); changed(); return true;
+}
 addEventListener('keydown', e => {
   if (!pid || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (cropMode) {                      // crop edit කරන වෙලාවේ වෙන shortcuts නෑ
@@ -858,9 +876,10 @@ addEventListener('keydown', e => {
     if (e.code !== 'Space') return;
   }
   if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  else if (e.key.startsWith('Arrow') && !e.ctrlKey && !e.altKey && !e.metaKey && nudge(e)) e.preventDefault();
   else if (e.key === 's' || e.key === 'S') split();
   else if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey) enterCrop();
-  else if (e.key === 'Delete' || e.key === 'Backspace') selFx ? delFx() : selImg ? delImg() : selText ? delText() : selSfx ? delSfx() : del();
+  else if (e.key === 'Delete' || e.key === 'Backspace') selFx ? delFx() : selImg ? delImg() : selShape ? delShape() : selText ? delText() : selSfx ? delSfx() : del();
   else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undoRedo(redo, undo, 'Redo'); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undoRedo(undo, redo, 'Undo'); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); undoRedo(redo, undo, 'Redo'); }
@@ -997,11 +1016,13 @@ $('#export').onclick = async () => {
     for (const t of texts) {
       if (!t.text.trim()) continue;
       const rr = await renderTextPng(t, W);
-      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, scr: scrDir(t), scv: scrV(t), spd: t.spd || 0.2, start: t.start, end: t.start + t.dur });
+      renders.push({ id: t.id, png: rr.png, wf: rr.wf, x: t.x, y: t.y, op: t.op ?? 1, scr: scrDir(t), scv: scrV(t), spd: t.spd || 0.2, z: t.z, start: t.start, end: t.start + t.dur });
     }
     $('#export').disabled = false; $('#xstat').textContent = '';
   }
-  const body = { clips, sfx, music, canvas, bg: canvasBg, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, fxs, imgs, mute, linked };
+  normZ();   // layer order (z) → 0..n-1 (text / image / shape share one stacking order)
+  const SW = outWidth(), SH = Math.round(SW / (outAspect() || 1)), shRenders = shapes.map(t => ({ ...renderShapePng(t, SW, SH), id: t.id, x: t.x, y: t.y, op: t.op, z: t.z, start: t.start, end: t.start + t.dur }));
+  const body = { clips, sfx, music, canvas, bg: canvasBg, width: $('#xres').value === 'hd' ? outWidth() : +$('#xres').value, preset: $('#xpreset').value, layers: texts, texts: renders, shapes: shRenders, shapeDefs: shapes, fxs, imgs, mute, linked };
   const r = await fetch(`/api/projects/${pid}/export`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { $('#xstat').textContent = 'Export error: ' + (await r.text()).slice(0, 120); return; }
@@ -1075,6 +1096,7 @@ async function openProject(id) {
   texts = (ed.texts || []).map(normT);
   fxs = (ed.fxs || []).map(normF);
   imgs = (ed.imgs || []).map(normI);
+  shapes = (ed.shapes || []).map(normS);
   // අන්තිමට තිබ්බ settings ආපහු
   pps = ui.pps || 40; $('#tzoom').value = pps;
   $('#xres').value = ui.res ?? 'hd'; $('#xpreset').value = ui.preset || 'veryfast';
@@ -1131,7 +1153,7 @@ $('#plist').onclick = async e => {
 function goHome(msg) {
   flush();
   ++openTok; pause();
-  pid = null; meta = null; clips = []; sfx = []; music = null; texts = []; fxs = []; imgs = []; dirty = false; linked = true; mute = false;
+  pid = null; meta = null; clips = []; sfx = []; music = null; texts = []; fxs = []; imgs = []; shapes = []; dirty = false; linked = true; mute = false;
   clearSel(); exitCrop(); zkey = '';
   video.removeAttribute('src'); video.load();
   document.body.classList.add('home');
@@ -1173,7 +1195,7 @@ async function loadFonts() {
 
 function placeEl(el, t, W) {
   const px = t.size * W;
-  Object.assign(el.style, { left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: padEm(t) + 'em',
+  Object.assign(el.style, { zIndex: Z0 + (t.z | 0), left: t.x * 100 + '%', top: t.y * 100 + '%', fontSize: px + 'px', padding: padEm(t) + 'em',
     fontFamily: fam(t.font), fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? 'italic' : 'normal', color: t.color, textAlign: t.align });
   if (scrDir(t)) el.style.left = dispX(t, el._wf || 0.2) * 100 + '%';
   if (scrV(t)) el.style.top = dispY(t, el._hf || 0.1) * 100 + '%';
@@ -1300,18 +1322,18 @@ txov.addEventListener('pointerdown', e => {
   el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
 });
 stage.addEventListener('pointerdown', e => {   // text එකෙන් පිට click කළාම text deselect
-  if (!(selText || selImg) || cropMode || e.target.closest('.tx') || e.target.closest('.im') || e.target.closest('.hd')) return;
+  if (!(selText || selImg || selShape) || cropMode || e.target.closest('.tx') || e.target.closest('.im') || e.target.closest('.sp') || e.target.closest('.hd')) return;
   clearSel(); render();
 });
 txov.addEventListener('dblclick', e => { if (e.target.closest('.tx')) { const a = $('#ttext'); a.focus(); a.select(); } });
 
 // ----- timeline: text / FX item move / trim (+ magnetic snap) -----
 track.addEventListener('pointerdown', e => {
-  const el = e.target.closest('.txi,.fxi,.imi'); if (!el || e.button) return;
-  const kind = el.classList.contains('fxi') ? 'fx' : el.classList.contains('imi') ? 'im' : 'tx', isFx = kind === 'fx';
-  const t = (isFx ? fxs : kind === 'im' ? imgs : texts).find(x => x.id === el.dataset.id); if (!t) return;
+  const el = e.target.closest('.txi,.fxi,.imi,.shi'); if (!el || e.button) return;
+  const kind = el.classList.contains('fxi') ? 'fx' : el.classList.contains('imi') ? 'im' : el.classList.contains('shi') ? 'sh' : 'tx', isFx = kind === 'fx';
+  const t = (isFx ? fxs : kind === 'im' ? imgs : kind === 'sh' ? shapes : texts).find(x => x.id === el.dataset.id); if (!t) return;
   swallow = true; setTimeout(() => swallow = false, 300);
-  if ((isFx ? selFx : kind === 'im' ? selImg : selText) !== t.id) { clearSel(); if (isFx) selFx = t.id; else if (kind === 'im') selImg = t.id; else selText = t.id; }
+  if ((isFx ? selFx : kind === 'im' ? selImg : kind === 'sh' ? selShape : selText) !== t.id) { clearSel(); if (isFx) selFx = t.id; else if (kind === 'im') selImg = t.id; else if (kind === 'sh') selShape = t.id; else selText = t.id; }
   const rc = el.getBoundingClientRect(), lx = e.clientX - rc.left;
   const mode = lx < 7 ? 'l' : lx > rc.width - 7 ? 'r' : 'm';
   const x0 = e.clientX, s0 = t.start, d0 = t.dur, e0 = s0 + d0, MIN = 0.2;
@@ -1321,7 +1343,7 @@ track.addEventListener('pointerdown', e => {
   const mv = ev => {
     const dt = (ev.clientX - x0) / pps;
     if (!moved && Math.abs(ev.clientX - x0) < 3) return;
-    if (!moved) { snap((isFx ? 'FX ' : kind === 'im' ? 'Image ' : 'Text ') + (mode === 'm' ? 'move' : 'trim')); moved = true; }
+    if (!moved) { snap((isFx ? 'FX ' : kind === 'im' ? 'Image ' : kind === 'sh' ? 'Shape ' : 'Text ') + (mode === 'm' ? 'move' : 'trim')); moved = true; }
     const on = snapOn && !ev.altKey; let hit = null;
     if (mode === 'm') {          // move: මුල හෝ අග ළඟම point එකට ඇලෙනවා
       let ns = Math.max(0, s0 + dt);
@@ -1346,7 +1368,7 @@ track.addEventListener('pointerdown', e => {
     hit ? showSnapLine(hit.v) : hideSnapLine();
     if (kind === 'im') syncGrpTime(t);
     el.style.left = t.start * pps + 'px'; el.style.width = Math.max(18, t.dur * pps) + 'px';
-    if (isFx) syncFx(t, true); else if (kind === 'im') { syncImg(t, true); applyImg(true); } else { syncText(t, true); applyText(true); }
+    if (isFx) syncFx(t, true); else if (kind === 'im') { syncImg(t, true); applyImg(true); } else if (kind === 'sh') { syncShape(t, true); applyShapes(true); } else { syncText(t, true); applyText(true); }
   };
   const up = () => {
     el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
@@ -1436,13 +1458,13 @@ $('#tscrD').onclick = e => { editT('Text scroll', t => { t.scr = 0; t.scv = 1; t
 $('#twhole').onclick = e => { editT('Text whole video', t => { t.start = 0; t.dur = +Math.max(0.2, total()).toFixed(2); }); e.target.blur(); };
 $('#tcx').onclick = () => editT('Center text X', t => t.x = 0.5);
 $('#tcy').onclick = () => editT('Center text Y', t => t.y = 0.5);
-$('#tdup').onclick = () => { const t = curText(); if (!t) return; snap('Duplicate text'); const n = { ...t, id: uid(), x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; texts.push(n); selText = n.id; changed(); };
+$('#tdup').onclick = () => { const t = curText(); if (!t) return; snap('Duplicate text'); const n = { ...t, id: uid(), z: nextZ(), x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; texts.push(n); selText = n.id; changed(); };
 $('#tdel').onclick = () => delText();
 function delText() { if (!selText) return; snap('Delete text'); texts = texts.filter(x => x.id !== selText); selText = null; changed(); }
 $('#addtext').onclick = () => {
   if (!pid) { setStatus('Open a project first'); return; }
   snap('Add text'); clearSel();
-  const t = normT({ ...txStyle, id: uid(), x: 0.5, y: 0.8, start: +head.toFixed(2), dur: +Math.max(0.5, Math.min(3, total() - head)).toFixed(2) });
+  const t = normT({ ...txStyle, id: uid(), z: nextZ(), x: 0.5, y: 0.8, start: +head.toFixed(2), dur: +Math.max(0.5, Math.min(3, total() - head)).toFixed(2) });
   texts.push(t); selText = t.id; changed();
   const a = $('#ttext'); a.focus(); a.select();
 };
@@ -1451,7 +1473,7 @@ $('#addscroll').onclick = () => {   // ticker: playhead එකේ ඉඳන් v
   if (!pid) { setStatus('Open a project first'); return; }
   snap('Add scrolling text'); clearSel();
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
-  const t = normT({ ...txStyle, id: uid(), text: 'Scrolling text', x: 0.5, y: 0.9, scr: -1, spd: 0.2, start, dur: +Math.max(0.5, T - start).toFixed(2) });
+  const t = normT({ ...txStyle, id: uid(), z: nextZ(), text: 'Scrolling text', x: 0.5, y: 0.9, scr: -1, spd: 0.2, start, dur: +Math.max(0.5, T - start).toFixed(2) });
   texts.push(t); selText = t.id; changed();
   const a = $('#ttext'); a.focus(); a.select();
 };
@@ -1544,13 +1566,13 @@ function addEmoji(u) {
   let t;
   if (join) {
     const g = cur.grp || (cur.grp = uid()), list = grpList(cur), c = grpCenter(list);
-    t = normI({ id: uid(), emoji: u, grp: g, w: cur.w, op: cur.op, start: cur.start, dur: cur.dur });
+    t = normI({ id: uid(), z: nextZ(), emoji: u, grp: g, w: cur.w, op: cur.op, start: cur.start, dur: cur.dur });
     imgs.push(t);
     layoutGrp(grpList(t), 0.5, c.cy, cur.w);       // group එක video එකේ මැදට (X), spacing + size equal
   } else {
     clearSel();
     const start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
-    t = normI({ id: uid(), emoji: u, x: 0.5, y: 0.5, w: EMW, op: 1, start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
+    t = normI({ id: uid(), z: nextZ(), emoji: u, x: 0.5, y: 0.5, w: EMW, op: 1, start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
     imgs.push(t);
   }
   selImg = t.id; changed();
@@ -1590,20 +1612,61 @@ $('#emcat').onchange = e => { emojiCat = e.target.value; $('#emq').value = ''; r
 $('#emq').oninput = renderEmojiGrid;
 $('#emgrid').addEventListener('click', e => { const b = e.target.closest('.emb'); if (b) addEmoji(b.dataset.u); });
 
+// ================= layer order (z): text + image / video / emoji + shapes share ONE stacking order =================
+// z = 0 .. n-1 (bottom → top). preview: each overlay element gets z-index = Z0 + z · export: backend sorts the overlays by z. The main video is always the bottom layer.
+const Z0 = 12;
+const HANDLES8 = ['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'];   // resize handles: 4 corners + 4 sides
+const allLayers = () => [...imgs.map(o => ({ k: 'im', o })), ...shapes.map(o => ({ k: 'sh', o })), ...texts.map(o => ({ k: 'tx', o }))];
+function normZ() {   // old projects (no z) keep the old look: images < shapes < text
+  const L = allLayers(); L.forEach((x, i) => x.i = i);
+  const key = x => Number.isFinite(x.o.z) ? x.o.z : -1e6 + x.i;
+  L.sort((a, b) => key(a) - key(b) || a.i - b.i);
+  L.forEach((x, r) => x.o.z = r);
+  return L;   // bottom → top
+}
+const nextZ = () => allLayers().reduce((m, x) => Math.max(m, Number.isFinite(x.o.z) ? x.o.z : -1), -1) + 1;
+function layerUnits() {   // top → bottom · an emoji group (same grp) is ONE unit so it moves as a whole
+  const L = normZ(), units = [], seen = new Set();
+  for (let i = L.length - 1; i >= 0; i--) {
+    const x = L[i];
+    if (x.k === 'im' && x.o.grp) {
+      if (seen.has(x.o.grp)) continue;
+      seen.add(x.o.grp);
+      units.push({ k: 'im', items: L.filter(y => y.k === 'im' && y.o.grp === x.o.grp).map(y => y.o) });
+    } else units.push({ k: x.k, items: [x.o] });
+  }
+  return units;
+}
+function applyUnits(units) { let z = 0; for (let i = units.length - 1; i >= 0; i--) units[i].items.forEach(o => o.z = z++); }   // units[0] = top
+const selItem = () => curImg() || curShape() || curText();
+function layerMove(how) {   // how: front | up | down | back
+  const o = selItem(); if (!o) return;
+  const units = layerUnits(), i = units.findIndex(u => u.items.includes(o)); if (i < 0) return;
+  const j = how === 'front' ? 0 : how === 'back' ? units.length - 1 : how === 'up' ? Math.max(0, i - 1) : Math.min(units.length - 1, i + 1);
+  if (j === i) { toast(how === 'front' || how === 'up' ? 'Already in front' : 'Already at the back (just above the main video)'); return; }
+  snap('Layer order'); const [u] = units.splice(i, 1); units.splice(j, 0, u); applyUnits(units); changed();
+}
+document.querySelectorAll('[data-lay]').forEach(b => b.onclick = e => { layerMove(b.dataset.lay); e.currentTarget.blur(); });
+
 // ================= image overlays =================
-const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, op: 1, start: 0, dur: 3, rad: 0, scr: 0, scv: 0, spd: 0.2 };
+// h = 0 → height follows the file's aspect ratio · h > 0 → freely resized height (fraction of canvas height) · lock = keep proportions while resizing
+const IMDEF = { asset: '', emoji: '', grp: '', x: 0.5, y: 0.5, w: 0.4, h: 0, lock: false, op: 1, start: 0, dur: 3, rad: 0, scr: 0, scv: 0, spd: 0.2 };
 const normI = t => ({ ...IMDEF, ...t });
 const curImg = () => imgs.find(x => x.id === selImg);
 const imov = $('#imov');
 
 function placeImg(el, t) {
-  Object.assign(el.style, { left: dispX(t, t.w) * 100 + '%', top: dispY(t, imHf(t)) * 100 + '%', width: t.w * 100 + '%' });
+  const custom = +t.h > 0;   // freely resized: width AND height set by the user
+  Object.assign(el.style, { zIndex: Z0 + (t.z | 0), left: dispX(t, t.w) * 100 + '%', top: dispY(t, imHf(t)) * 100 + '%', width: t.w * 100 + '%', height: custom ? t.h * 100 + '%' : '' });
+  el.classList.toggle('free', custom);
+  const a0 = t.emoji ? null : asset(t.asset);   // box keeps the file's proportions even before the image / video has loaded
+  el.style.aspectRatio = !custom && a0?.w && a0?.h ? `${a0.w} / ${a0.h}` : '';
   el._xl = null; el._yl = null;
   const im = el.firstChild, src = t.emoji ? `/api/emoji/${t.emoji}.png` : `/api/assets/${t.asset}/file`;
   if (im.getAttribute('src') !== src) im.src = src;
   // corner radius (px): image එකේ පොඩි පැත්තේ fraction × radius
   const a = t.emoji ? null : asset(t.asset), ar = (im.naturalWidth || im.videoWidth) && (im.naturalHeight || im.videoHeight) ? (im.naturalWidth || im.videoWidth) / (im.naturalHeight || im.videoHeight) : a?.w && a?.h ? a.w / a.h : 1;
-  const Wp = t.w * stage.clientWidth, Rp = (+t.rad || 0) * Math.min(Wp, Wp / ar);
+  const Wp = t.w * stage.clientWidth, Hp = custom ? t.h * stage.clientHeight : Wp / ar, Rp = (+t.rad || 0) * Math.min(Wp, Hp);
   im.style.borderRadius = Rp >= 0.5 ? Rp.toFixed(1) + 'px' : '0';
   el.classList.toggle('sel', t.id === selImg);
 }
@@ -1617,7 +1680,7 @@ function renderImgs() {
     if (el && !!el._vid !== isV) { el.remove(); el = null; }   // assets late load වුනාම img ↔ video මාරු
     if (!el) {
       el = document.createElement('div'); el.className = 'im'; el.dataset.id = t.id; el._vid = isV;
-      el.innerHTML = (isV ? '<video muted loop playsinline preload="auto" draggable="false"></video>' : '<img draggable="false" alt="">') + ['tl', 'tr', 'bl', 'br'].map(h => `<i class="th" data-h="${h}"></i>`).join('');
+      el.innerHTML = (isV ? '<video muted loop playsinline preload="auto" draggable="false"></video>' : '<img draggable="false" alt="">') + HANDLES8.map(h => `<i class="th" data-h="${h}"></i>`).join('');
       el.firstChild[isV ? 'onloadedmetadata' : 'onload'] = () => { const m = imgs.find(x => x.id === el.dataset.id); if (m) placeImg(el, m); };   // natural size ආවම radius ආයෙත් ගණන් කරනවා
       imov.appendChild(el);
     }
@@ -1659,7 +1722,7 @@ function addImg(a, scroll) {
   const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2);
   const nat = a.w && a.h ? a.w / a.h : 1, ca = canvasAspect();
   let w = 0.4; if (w * ca / nat > 0.5) w = 0.5 * nat / ca;   // canvas එකේ උස භාගයකට වඩා නොවෙන්න
-  const t = normI({ id: uid(), asset: a.id, x: 0.5, y: 0.5, w: +w.toFixed(3), op: 1, start, dur: +Math.max(0.5, Math.min(a.vid ? (a.duration || 3) : 3, T - start)).toFixed(2) });
+  const t = normI({ id: uid(), z: nextZ(), asset: a.id, x: 0.5, y: 0.5, w: +w.toFixed(3), op: 1, start, dur: +Math.max(0.5, Math.min(a.vid ? (a.duration || 3) : 3, T - start)).toFixed(2) });
   if (scroll) {   // scrolling logo: පොඩි size, පහළට ළඟින්, video end එක දක්වා, වමට යනවා
     t.w = +Math.min(t.w, 0.2).toFixed(3); t.y = 0.9; t.scr = -1; t.spd = 0.2; t.dur = +Math.max(0.5, T - start).toFixed(2);
   }
@@ -1674,20 +1737,83 @@ function delImg() {
   changed();
 }
 
-// ----- preview: move (magnetic: center / edges / grid) / resize (corner handles) -----
+// ----- preview: move (magnetic: center / edges / grid) / FREE resize (corner + side handles) -----
+// Shared by image / video / emoji overlays and shapes.
+//  · drag the item = move anywhere (it may even leave the canvas a bit) · Alt / the 🧲 button = no magnetic snapping
+//  · side handle = stretch one direction only · corner handle = stretch width + height freely
+//  · hold Shift (or tick "Keep proportions") = keep the proportions
+const MINBOX = 0.02, OUTMIN = -0.3, OUTMAX = 1.3;
+function startBoxDrag(e, el, t, cfg) {
+  const handle = e.target.closest('.th')?.dataset.h;
+  const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
+  const px0 = e.clientX, py0 = e.clientY;
+  const bw = el.offsetWidth || 1, bh = el.offsetHeight || 1;
+  const sc = !!cfg.scroll && scrDir(t), off = sc ? scrOff(t) : 0, scv = !!cfg.scroll && scrV(t), offY = scv ? scrOffY(t) : 0;
+  const x0 = cfg.scroll ? dispX(t, t.w) : t.x, y0 = cfg.scroll ? dispY(t, imHf(t)) : t.y;   // scroll item: drag from where it is NOW, t.x / t.y = its starting point
+  const setX = cx => { t.x = sc ? wrapX(cx - off, t.w) : cx; };
+  const setY = cy => { t.y = scv ? wrapX(cy - offY, cfg.hf(t)) : cy; };
+  let moved = false;
+  el.setPointerCapture?.(e.pointerId);
+  const mv = ev => {
+    const dx = ev.clientX - px0, dy = ev.clientY - py0;
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+    if (!moved) { snap((handle ? 'Resize ' : 'Move ') + cfg.name); moved = true; }
+    if (handle) {
+      const l = handle.includes('l'), r = handle.includes('r'), tp = handle.includes('t'), b = handle.includes('b'), corner = (l || r) && (tp || b);
+      const cx0 = x0 * W, cy0 = y0 * H, L = cx0 - bw / 2, Rt = cx0 + bw / 2, T = cy0 - bh / 2, B = cy0 + bh / 2;
+      const px = ev.clientX - R.left, py = ev.clientY - R.top, MN = MINBOX * Math.min(W, H);
+      let nL = L, nR = Rt, nT = T, nB = B;
+      if (l) nL = Math.min(px, Rt - MN); if (r) nR = Math.max(px, L + MN);   // free: only the dragged edges move
+      if (tp) nT = Math.min(py, B - MN); if (b) nB = Math.max(py, T + MN);
+      const keep = ev.shiftKey || !!t.lock;
+      if (keep) {
+        if (corner) {   // opposite corner stays fixed, scale along the diagonal
+          const sx = l ? -1 : 1, sy = tp ? -1 : 1, fx = l ? Rt : L, fy = tp ? B : T, vx = sx * bw, vy = sy * bh;
+          const k = clampN(((px - fx) * vx + (py - fy) * vy) / (vx * vx + vy * vy), 0.05, 30), nw = bw * k, nh = bh * k;
+          nL = sx > 0 ? fx : fx - nw; nR = nL + nw; nT = sy > 0 ? fy : fy - nh; nB = nT + nh;
+        } else if (l || r) {   // side: scale both, the other axis stays centered
+          const k = (nR - nL) / bw, nh = bh * k; nT = cy0 - nh / 2; nB = cy0 + nh / 2;
+        } else {
+          const k = (nB - nT) / bh, nw = bw * k; nL = cx0 - nw / 2; nR = cx0 + nw / 2;
+        }
+      }
+      const newW = nR - nL, newH = nB - nT;
+      t.w = clampN(newW / W, MINBOX, 6);
+      if (cfg.alwaysH || !keep || +t.h > 0) t.h = clampN(newH / H, MINBOX, 8); else t.h = 0;   // an image keeps "auto height" only while it is resized proportionally
+      setX((nL + nR) / 2 / W); setY((nT + nB) / 2 / H); guides(null, null);
+    } else {
+      let nx = clampN(x0 + dx / W, OUTMIN, OUTMAX), ny = clampN(y0 + dy / H, OUTMIN, OUTMAX), gv = null, gh = null;
+      if (snapOn && !ev.altKey) {
+        const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
+        if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+        const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
+        nx = a.c; ny = b.c; gv = a.line; gh = b.line;
+      }
+      setX(nx); setY(ny); guides(gv, gh);
+    }
+    cfg.place(el, t);
+    cfg.sync(t, true);
+    touch();
+  };
+  const up = () => {
+    el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+    guides(null, null);
+    if (moved) changed();
+  };
+  el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+}
+
 imov.addEventListener('pointerdown', e => {
   const el = e.target.closest('.im'); if (!el || e.button) return;
   const t = imgs.find(x => x.id === el.dataset.id); if (!t) return;
   e.preventDefault(); e.stopPropagation();
   if (selImg !== t.id) { clearSel(); selImg = t.id; render(); }
+  if (!t.grp) { startBoxDrag(e, el, t, { name: 'image', place: placeImg, sync: syncImg, scroll: true, hf: imHf }); return; }
+  // ----- emoji group: spacing + size fixed, the group moves / scales as a whole (proportional) -----
   const handle = e.target.closest('.th')?.dataset.h;
   const R = stage.getBoundingClientRect(), W = R.width, H = R.height;
-  const px0 = e.clientX, py0 = e.clientY, x0 = dispX(t, t.w), y0 = dispY(t, imHf(t)), w0 = t.w, bw = el.offsetWidth, bh = el.offsetHeight;
-  const isG = !!t.grp, list = grpList(t), gc = grpCenter(list);
-  const sc = !isG && scrDir(t), off = sc ? scrOff(t) : 0;   // scroll image: දැන් පේන තැනින් drag, t.x = පටන් ගන්න තැන
-  const scv = !isG && scrV(t), offY = scv ? scrOffY(t) : 0, hf = imHf(t);
-  const setY = cy => { t.y = scv ? wrapX(cy - offY, hf) : cy; };
-  const setX = cx => { t.x = sc ? wrapX(cx - off, t.w) : cx; };   // group = emoji කීපයක් එකට (spacing + size fixed, center)
+  const px0 = e.clientX, py0 = e.clientY, w0 = t.w, bh = el.offsetHeight;
+  const list = grpList(t), gc = grpCenter(list);
   const gd0 = Math.hypot(e.clientX - R.left - gc.cx * W, e.clientY - R.top - gc.cy * H) || 1;
   let moved = false;
   el.setPointerCapture?.(e.pointerId);
@@ -1695,42 +1821,20 @@ imov.addEventListener('pointerdown', e => {
     const dx = ev.clientX - px0, dy = ev.clientY - py0;
     if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
     if (!moved) { snap(handle ? 'Resize image' : 'Move image'); moved = true; }
-    if (isG) {
-      if (handle) {   // group size: group center fixed, හැම emoji එකම එකපාර
-        const k = Math.max(0.05, Math.min(10, Math.hypot(ev.clientX - R.left - gc.cx * W, ev.clientY - R.top - gc.cy * H) / gd0));
-        layoutGrp(list, gc.cx, gc.cy, w0 * k);
-      } else {        // group move: මුළු group එකම magnetic center එකට
-        let nx = clampN(gc.cx + dx / W, 0, 1), ny = clampN(gc.cy + dy / H, 0, 1), gv = null, gh = null;
-        if (snapOn && !ev.altKey) {
-          const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
-          if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
-          const a = snap1(nx, grpSpan(list.length, t.w) / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
-          nx = a.c; ny = b.c; gv = a.line; gh = b.line;
-        }
-        layoutGrp(list, nx, ny, t.w); guides(gv, gh);
+    if (handle) {   // group size: group center fixed, හැම emoji එකම එකපාර
+      const k = Math.max(0.05, Math.min(10, Math.hypot(ev.clientX - R.left - gc.cx * W, ev.clientY - R.top - gc.cy * H) / gd0));
+      layoutGrp(list, gc.cx, gc.cy, w0 * k);
+    } else {        // group move: මුළු group එකම magnetic center එකට
+      let nx = clampN(gc.cx + dx / W, OUTMIN, OUTMAX), ny = clampN(gc.cy + dy / H, OUTMIN, OUTMAX), gv = null, gh = null;
+      if (snapOn && !ev.altKey) {
+        const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
+        if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
+        const a = snap1(nx, grpSpan(list.length, t.w) / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
+        nx = a.c; ny = b.c; gv = a.line; gh = b.line;
       }
-      placeGrpEls(list);
-    } else {
-      if (handle) {
-        const sx = handle.includes('l') ? -1 : 1, sy = handle.includes('t') ? -1 : 1;
-        const fx = x0 * W - sx * bw / 2, fy = y0 * H - sy * bh / 2;               // opposite (fixed) corner
-        const vx = sx * bw, vy = sy * bh, px = ev.clientX - R.left - fx, py = ev.clientY - R.top - fy;
-        const k = Math.max(0.05, Math.min(10, (px * vx + py * vy) / (vx * vx + vy * vy)));
-        t.w = Math.max(0.03, Math.min(4, w0 * k));
-        const kk = t.w / w0;
-        setX((fx + sx * bw * kk / 2) / W); setY((fy + sy * bh * kk / 2) / H);
-      } else {
-        let nx = clampN(x0 + dx / W, 0, 1), ny = clampN(y0 + dy / H, 0, 1), gv = null, gh = null;
-        if (snapOn && !ev.altKey) {
-          const vl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }], hl = [{ v: 0.5, center: true }, { v: 0 }, { v: 1 }];
-          if (gridOn) for (const v of [1 / 3, 2 / 3]) { vl.push({ v }); hl.push({ v }); }
-          const a = snap1(nx, bw / W / 2, vl, 7 / W), b = snap1(ny, bh / H / 2, hl, 7 / H);
-          nx = a.c; ny = b.c; gv = a.line; gh = b.line;
-        }
-        setX(nx); setY(ny); guides(gv, gh);
-      }
-      placeImg(el, t);
+      layoutGrp(list, nx, ny, t.w); guides(gv, gh);
     }
+    placeGrpEls(list);
     if (selImg === t.id) syncImg(t, true);
     touch();
   };
@@ -1748,6 +1852,9 @@ function syncImg(t, light) {
   if (document.activeElement !== $('#idur')) $('#idur').value = (+t.dur).toFixed(2);
   const sz = Math.round(t.w * 100), op = Math.round(t.op * 100);
   $('#isize').value = sz; $('#isizev').textContent = sz + '%';
+  const iwp = Math.round(t.w * 100), ihp = Math.round(imHf(t) * 100);   // free size: width % of the canvas width · height % of the canvas height
+  $('#iw').value = clampN(iwp, 2, 300); $('#iwv').textContent = iwp + '%'; $('#ih').value = clampN(ihp, 2, 300); $('#ihv').textContent = ihp + '%';
+  $('#ilock').checked = !!t.lock;
   $('#iop').value = op; $('#iopv').textContent = op + '%';
   const rd = Math.round((t.rad || 0) * 100), px = Math.round(t.x * 100), py = Math.round(t.y * 100), sd = scrDir(t), sv = scrV(t), ss = Math.round((t.spd || 0.2) * 100);
   $('#irad').value = rd; $('#iradv').textContent = rd + '%';
@@ -1755,7 +1862,8 @@ function syncImg(t, light) {
   $('#ispd').value = ss; $('#ispdv').textContent = ss + '%/s';
   [['#iscr0', !sd && !sv], ['#iscrL', sd < 0], ['#iscrR', sd > 0], ['#iscrU', sv < 0], ['#iscrD', sv > 0]].forEach(([id, on]) => $(id).classList.toggle('on', on));
   const grouped = !!t.grp && grpList(t).length > 1;   // emoji group = scroll නෑ
-  ['#iscr0', '#iscrL', '#iscrR', '#iscrU', '#iscrD', '#ipx', '#ipy'].forEach(id => $(id).disabled = grouped);
+  ['#iscr0', '#iscrL', '#iscrR', '#iscrU', '#iscrD', '#ipx', '#ipy', '#iw', '#ih', '#ilock'].forEach(id => $(id).disabled = grouped);
+  $('#irst').disabled = grouped || !(+t.h > 0);
   $('#ispd').disabled = grouped || !(sd || sv); $('#iscrnote').textContent = grouped ? 'Emoji groups have no scroll / position sliders (use Ungroup)' : (sd || sv) ? (sv ? 'Y' : 'X') + ' = starting point · you can also drag it in the preview' : '';
   if (light) return;
   const n = grpList(t).length;
@@ -1764,8 +1872,13 @@ function syncImg(t, light) {
 }
 function editI(label, fn) { const t = curImg(); if (!t) return; snapT(label); fn(t); syncGrpTime(t); changed(); }
 $('#iop').oninput = e => editI('Image opacity', t => grpList(t).forEach(m => m.op = clampN(+e.target.value / 100, 0, 1)));
-$('#isize').oninput = e => editI('Image size', t => { const w = Math.max(0.03, +e.target.value / 100); if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, c.cy, w); } else t.w = w; });
-['#iop', '#isize'].forEach(id => $(id).onchange = e => e.target.blur());
+$('#isize').oninput = e => editI('Image size', t => { const w = Math.max(0.03, +e.target.value / 100); if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, c.cy, w); } else { const k = w / t.w; if (+t.h > 0) t.h = clampN(t.h * k, MINBOX, 8); t.w = w; } });
+// free size: Width / Height are independent (unless "Keep proportions" is ticked)
+$('#iw').oninput = e => editI('Image width', t => { const w = clampN(+e.target.value / 100, MINBOX, 6); if (t.lock && +t.h > 0) t.h = clampN(t.h * w / t.w, MINBOX, 8); t.w = w; });
+$('#ih').oninput = e => editI('Image height', t => { const h = clampN(+e.target.value / 100, MINBOX, 8); if (t.lock) { t.w = clampN(t.w * h / imHf(t), MINBOX, 6); if (+t.h > 0) t.h = h; } else t.h = h; });
+$('#ilock').onchange = e => editI('Keep proportions', t => t.lock = e.target.checked);
+$('#irst').onclick = e => { editI('Original ratio', t => { t.h = 0; }); e.target.blur(); };
+['#iop', '#isize', '#iw', '#ih'].forEach(id => $(id).onchange = e => e.target.blur());
 $('#irad').oninput = e => editI('Image corner radius', t => t.rad = clampN(+e.target.value / 100, 0, 0.5));
 $('#ipx').oninput = e => editI('Image X', t => t.x = +e.target.value / 100);
 $('#ipy').oninput = e => editI('Image Y', t => t.y = +e.target.value / 100);
@@ -1783,9 +1896,247 @@ $('#ifit').onclick = e => { editI('Image → video end', t => { t.start = Math.m
 $('#iend').onclick = e => { editI('Image → playhead', t => { t.dur = Math.max(MINT, head - t.start); }); e.target.blur(); };
 $('#icx').onclick = e => { editI('Center image X', t => { if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, 0.5, c.cy, t.w); } else t.x = 0.5; }); e.target.blur(); };
 $('#icy').onclick = e => { editI('Center image Y', t => { if (t.grp) { const l = grpList(t), c = grpCenter(l); layoutGrp(l, c.cx, 0.5, t.w); } else t.y = 0.5; }); e.target.blur(); };
-$('#idup').onclick = () => { const t = curImg(); if (!t) return; snap('Duplicate image'); const n = { ...t, id: uid(), grp: '', x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; imgs.push(n); selImg = n.id; changed(); };
+$('#idup').onclick = () => { const t = curImg(); if (!t) return; snap('Duplicate image'); const n = { ...t, id: uid(), z: nextZ(), grp: '', x: Math.min(1, t.x + 0.03), y: Math.min(1, t.y + 0.03) }; imgs.push(n); selImg = n.id; changed(); };
 $('#idel').onclick = () => delImg();
 $('#iungrp').onclick = () => { const t = curImg(); if (!t?.grp) return; snap('Ungroup emoji'); imgs.forEach(x => { if (x.grp === t.grp) x.grp = ''; }); changed(); };
+
+// ================= shapes =================
+// Vector shapes: rectangle (corner radius), circle / ellipse, triangle, diamond, pentagon, hexagon, star, heart, arrow, line.
+// Free resize (width and height independent) · fill + stroke colors · opacity · timing · layer order.
+// w = width (fraction of the canvas width) · h = height (fraction of the canvas height) · x / y = center (0..1)
+// shapeD() draws the SAME path in the preview (SVG) and in the export (canvas → PNG), so both look identical.
+const SHAPES = { rect: 'Rectangle', ellipse: 'Circle / ellipse', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', heart: 'Heart', arrow: 'Arrow', line: 'Line' };
+const SHDEF = { type: 'rect', x: 0.5, y: 0.5, w: 0.28, h: 0.28, lock: false, fill: '#4f86f5', fop: 1, sc: '#ffffff', sw: 0, op: 1, rad: 0, start: 0, dur: 3 };
+const normS = t => ({ ...SHDEF, ...t });
+const curShape = () => shapes.find(x => x.id === selShape);
+let shStyle = {}; try { shStyle = JSON.parse(localStorage.shStyle || '{}'); } catch {}
+const rememberS = t => { shStyle = { fill: t.fill, fop: t.fop, sc: t.sc, sw: t.sw }; localStorage.shStyle = JSON.stringify(shStyle); };
+
+const f2 = n => +(+n).toFixed(2);
+function polyD(pts, x0, y0, bw, bh) {   // points (any units) → scaled to fill the box exactly
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), mnx = Math.min(...xs), mny = Math.min(...ys);
+  const sx = bw / ((Math.max(...xs) - mnx) || 1), sy = bh / ((Math.max(...ys) - mny) || 1);
+  return 'M' + pts.map(p => `${f2(x0 + (p[0] - mnx) * sx)} ${f2(y0 + (p[1] - mny) * sy)}`).join('L') + 'Z';
+}
+const ngonPts = (n, rot) => Array.from({ length: n }, (_, i) => { const a = rot + i * 2 * Math.PI / n; return [Math.cos(a), Math.sin(a)]; });
+const starPts = (n, ri) => Array.from({ length: n * 2 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? ri : 1; return [r * Math.cos(a), r * Math.sin(a)]; });
+const HEART = [[50, 90], [10, 60, 0, 35, 0, 25], [0, 8, 14, 0, 27, 0], [38, 0, 46, 6, 50, 14], [54, 6, 62, 0, 73, 0], [86, 0, 100, 8, 100, 25], [100, 35, 90, 60, 50, 90]];
+function shapeD(type, w, h, inset, rad) {   // path (px) of a shape inside a w × h box; stroke is drawn INSIDE the box (inset = stroke / 2)
+  const i = Math.max(0, inset || 0), bw = Math.max(1, w - 2 * i), bh = Math.max(1, h - 2 * i), x0 = i, y0 = i, x1 = x0 + bw, y1 = y0 + bh, cx = x0 + bw / 2, cy = y0 + bh / 2;
+  switch (type) {
+    case 'ellipse': { const rx = bw / 2, ry = bh / 2; return `M${f2(cx - rx)} ${f2(cy)}A${f2(rx)} ${f2(ry)} 0 1 0 ${f2(cx + rx)} ${f2(cy)}A${f2(rx)} ${f2(ry)} 0 1 0 ${f2(cx - rx)} ${f2(cy)}Z`; }
+    case 'triangle': return `M${f2(cx)} ${f2(y0)}L${f2(x1)} ${f2(y1)}L${f2(x0)} ${f2(y1)}Z`;
+    case 'diamond': return `M${f2(cx)} ${f2(y0)}L${f2(x1)} ${f2(cy)}L${f2(cx)} ${f2(y1)}L${f2(x0)} ${f2(cy)}Z`;
+    case 'pentagon': return polyD(ngonPts(5, -Math.PI / 2), x0, y0, bw, bh);
+    case 'hexagon': return polyD(ngonPts(6, 0), x0, y0, bw, bh);
+    case 'star': return polyD(starPts(5, 0.42), x0, y0, bw, bh);
+    case 'arrow': return polyD([[0, 0.3], [0.58, 0.3], [0.58, 0], [1, 0.5], [0.58, 1], [0.58, 0.7], [0, 0.7]], x0, y0, bw, bh);
+    case 'heart': {
+      const X = v => f2(x0 + v / 100 * bw), Y = v => f2(y0 + v / 90 * bh);
+      return `M${X(HEART[0][0])} ${Y(HEART[0][1])}` + HEART.slice(1).map(c => `C${X(c[0])} ${Y(c[1])} ${X(c[2])} ${Y(c[3])} ${X(c[4])} ${Y(c[5])}`).join('') + 'Z';
+    }
+    default: {   // rect (corner radius = fraction of the short side) · line = rounded bar
+      const r = f2(Math.min(bw, bh) * (type === 'line' ? 0.5 : clampN(+rad || 0, 0, 0.5)));
+      if (r < 0.5) return `M${f2(x0)} ${f2(y0)}H${f2(x1)}V${f2(y1)}H${f2(x0)}Z`;
+      return `M${f2(x0 + r)} ${f2(y0)}H${f2(x1 - r)}A${r} ${r} 0 0 1 ${f2(x1)} ${f2(y0 + r)}V${f2(y1 - r)}A${r} ${r} 0 0 1 ${f2(x1 - r)} ${f2(y1)}H${f2(x0 + r)}A${r} ${r} 0 0 1 ${f2(x0)} ${f2(y1 - r)}V${f2(y0 + r)}A${r} ${r} 0 0 1 ${f2(x0 + r)} ${f2(y0)}Z`;
+    }
+  }
+}
+function shapeIcon(type, fill, sc, big) {   // small SVG icon (shape buttons + layer thumbnails)
+  const line = type === 'line', w = 20, h = line ? 6 : 20, d = shapeD(type, w, h, 0, 0.18);
+  return `<svg viewBox="0 0 24 24"><g transform="translate(2,${line ? 9 : 2})"><path d="${d}" fill="${fill || 'none'}" stroke="${fill ? 'none' : (sc || '#c9cedc')}" stroke-width="1.6" stroke-linejoin="round"/></g></svg>`;
+}
+$('#shgrid').innerHTML = Object.entries(SHAPES).map(([k, n]) => `<button data-sh="${k}" title="Add ${esc(n)}">${shapeIcon(k, '#9db8f5')}<span>${esc(n.split(' ')[0])}</span></button>`).join('');
+$('#shtype').innerHTML = Object.entries(SHAPES).map(([k, n]) => `<option value="${k}">${esc(n)}</option>`).join('');
+$('#shgrid').onclick = e => { const b = e.target.closest('button'); if (b) { addShape(b.dataset.sh); b.blur(); } };
+
+const shov = $('#shov');
+function placeShape(el, t) {
+  const W = stage.clientWidth || 1, H = stage.clientHeight || 1, pw = Math.max(1, t.w * W), ph = Math.max(1, t.h * H), sw = (+t.sw || 0) * W;
+  Object.assign(el.style, { zIndex: Z0 + (t.z | 0), left: t.x * 100 + '%', top: t.y * 100 + '%', width: t.w * 100 + '%', height: t.h * 100 + '%' });
+  const svg = el.firstChild, path = svg.firstChild;
+  svg.setAttribute('viewBox', `0 0 ${f2(pw)} ${f2(ph)}`); svg.setAttribute('preserveAspectRatio', 'none');
+  path.setAttribute('d', shapeD(t.type, pw, ph, sw / 2, t.rad));
+  path.setAttribute('fill', t.fill || 'none'); path.setAttribute('fill-opacity', t.fop ?? 1);
+  path.setAttribute('stroke', sw > 0.01 ? t.sc : 'none'); path.setAttribute('stroke-width', f2(sw)); path.setAttribute('stroke-linejoin', 'round');
+  el.classList.toggle('sel', t.id === selShape);
+}
+function renderShapes() {
+  if (!stage.clientWidth) return;
+  shov.hidden = cropMode;
+  const have = new Map([...shov.children].map(e => [e.dataset.id, e]));
+  shapes.forEach(t => {
+    let el = have.get(t.id); have.delete(t.id);
+    if (!el) {
+      el = document.createElement('div'); el.className = 'sp'; el.dataset.id = t.id;
+      el.innerHTML = '<svg><path/></svg>' + HANDLES8.map(h => `<i class="th" data-h="${h}"></i>`).join('');
+      shov.appendChild(el);
+    }
+    placeShape(el, t);
+  });
+  have.forEach(e => e.remove());
+  applyShapes(true);
+}
+function applyShapes(force) {   // shape එක පෙන්නන්නේ එහි time range එකේදී (select කරලා තියෙන එක අඩු opacity එකෙන් හැමවෙලේම)
+  for (const el of shov.children) {
+    const t = shapes.find(x => x.id === el.dataset.id); if (!t) continue;
+    const on = head >= t.start - 1e-6 && head < t.start + t.dur - 1e-6, v = on ? 1 : t.id === selShape ? 2 : 0;
+    const o = v === 2 ? 0.35 : t.op;
+    if (force || el._v !== v || el._o !== o) { el._v = v; el._o = o; el.style.display = v ? '' : 'none'; el.style.opacity = o; }
+  }
+}
+shov.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.sp'); if (!el || e.button) return;
+  const t = shapes.find(x => x.id === el.dataset.id); if (!t) return;
+  e.preventDefault(); e.stopPropagation();
+  if (selShape !== t.id) { clearSel(); selShape = t.id; render(); }
+  startBoxDrag(e, el, t, { name: 'shape', place: placeShape, sync: syncShape, scroll: false, alwaysH: true, hf: x => x.h });
+});
+
+function addShape(type) {
+  if (!pid) { setStatus('Open a project first'); return; }
+  snap('Add shape'); clearSel();
+  const T = total(), start = +Math.min(head, Math.max(0, T - 0.5)).toFixed(2), asp = outAspect() || 1;
+  const w = type === 'line' ? 0.4 : 0.28, h = type === 'line' ? 0.012 : Math.min(0.9, w * asp);   // new shapes are square in pixels
+  const t = normS({ ...shStyle, id: uid(), z: nextZ(), type, x: 0.5, y: 0.5, w, h: +h.toFixed(4), start, dur: +Math.max(0.5, Math.min(3, T - start)).toFixed(2) });
+  shapes.push(t); selShape = t.id; changed();
+  if (head < t.start || head >= t.start + t.dur) seek(t.start + 0.01);
+}
+function delShape() { if (!selShape) return; snap('Delete shape'); shapes = shapes.filter(x => x.id !== selShape); selShape = null; changed(); }
+
+// ----- shape inspector -----
+const PAL = ['#ffffff', '#000000', '#ff3b30', '#ffd60a', '#34c759', '#0a84ff', '#ff9f0a', '#ff2d92', '#bf5af2', '#00e5ff'];
+function colorRow(id, none, label, get, set) {   // swatches + custom color picker
+  const el = $('#' + id);
+  el.innerHTML = (none ? '<button class="none" data-c="" title="No fill">None</button>' : '') + PAL.map(c => `<button data-c="${c}" style="background:${c}" title="${c}"></button>`).join('') + '<input type="color" class="cc" value="#4f86f5" title="Custom color">';
+  el.onclick = e => { const b = e.target.closest('button'); if (b) editS(label, t => set(t, b.dataset.c)); };
+  el.querySelector('input').oninput = e => editS(label, t => set(t, e.target.value));
+  el._sync = t => { const v = get(t) || ''; el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.c === v)); const ci = el.querySelector('input'); if (v) ci.value = v; };
+}
+function editS(label, fn) { const t = curShape(); if (!t) return; snapT(label); fn(t); rememberS(t); changed(); }
+colorRow('shfill', true, 'Shape fill', t => t.fill, (t, c) => { t.fill = c; if (c && !(t.fop > 0)) t.fop = 1; });
+colorRow('shsc', false, 'Shape stroke color', t => t.sc, (t, c) => { t.sc = c; if (!(t.sw > 0)) t.sw = 0.006; });
+function syncShape(t, light) {   // light = drag වෙලාවේ sliders / numbers විතරයි
+  if (document.activeElement !== $('#shstart')) $('#shstart').value = (+t.start).toFixed(2);
+  if (document.activeElement !== $('#shdur')) $('#shdur').value = (+t.dur).toFixed(2);
+  const wp = Math.round(t.w * 100), hp = Math.round(t.h * 100), px = Math.round(t.x * 100), py = Math.round(t.y * 100);
+  $('#shw').value = clampN(wp, 2, 300); $('#shwv').textContent = wp + '%'; $('#shh').value = clampN(hp, 2, 300); $('#shhv').textContent = hp + '%';
+  $('#shpx').value = clampN(px, -30, 130); $('#shpxv').textContent = px + '%'; $('#shpy').value = clampN(py, -30, 130); $('#shpyv').textContent = py + '%';
+  if (light) return;
+  const fo = Math.round((t.fop ?? 1) * 100), op = Math.round(t.op * 100), rd = Math.round((t.rad || 0) * 100);
+  $('#shfop').value = fo; $('#shfopv').textContent = fo + '%';
+  $('#shsw').value = clampN(Math.round(t.sw * 2000), 0, 100); $('#shswv').textContent = (t.sw * 100).toFixed(1) + '%';
+  $('#shrad').value = rd; $('#shradv').textContent = rd + '%'; $('#shrad').disabled = t.type !== 'rect';
+  $('#shop').value = op; $('#shopv').textContent = op + '%';
+  $('#shtype').value = t.type; $('#shlock').checked = !!t.lock;
+  $('#shfill')._sync(t); $('#shsc')._sync(t);
+}
+$('#shtype').onchange = e => { editS('Shape type', t => t.type = e.target.value); e.target.blur(); };
+$('#shfop').oninput = e => editS('Fill opacity', t => t.fop = clampN(+e.target.value / 100, 0, 1));
+$('#shsw').oninput = e => editS('Stroke width', t => t.sw = clampN(+e.target.value / 2000, 0, 0.05));
+$('#shrad').oninput = e => editS('Corner radius', t => t.rad = clampN(+e.target.value / 100, 0, 0.5));
+$('#shop').oninput = e => editS('Shape opacity', t => t.op = clampN(+e.target.value / 100, 0, 1));
+$('#shw').oninput = e => editS('Shape width', t => { const w = clampN(+e.target.value / 100, MINBOX, 6); if (t.lock) t.h = clampN(t.h * w / t.w, MINBOX, 8); t.w = w; });
+$('#shh').oninput = e => editS('Shape height', t => { const h = clampN(+e.target.value / 100, MINBOX, 8); if (t.lock) t.w = clampN(t.w * h / t.h, MINBOX, 6); t.h = h; });
+$('#shlock').onchange = e => editS('Keep proportions', t => t.lock = e.target.checked);
+$('#shpx').oninput = e => editS('Shape X', t => t.x = +e.target.value / 100);
+$('#shpy').oninput = e => editS('Shape Y', t => t.y = +e.target.value / 100);
+['#shfop', '#shsw', '#shrad', '#shop', '#shw', '#shh', '#shpx', '#shpy'].forEach(id => $(id).onchange = e => e.target.blur());
+$('#shcx').onclick = e => { editS('Center shape X', t => t.x = 0.5); e.target.blur(); };
+$('#shcy').onclick = e => { editS('Center shape Y', t => t.y = 0.5); e.target.blur(); };
+$('#shsq').onclick = e => { editS('Square shape', t => { t.h = clampN(t.w * (stage.clientWidth || 1) / (stage.clientHeight || 1), MINBOX, 8); }); e.target.blur(); };
+$('#shstart').onchange = e => editS('Shape time', t => t.start = Math.max(0, +e.target.value || 0));
+$('#shdur').onchange = e => editS('Shape time', t => t.dur = Math.max(0.2, +e.target.value || 3));
+$('#shwhole').onclick = e => { editS('Shape whole video', t => { t.start = 0; t.dur = +Math.max(0.2, total()).toFixed(2); }); e.target.blur(); };
+$('#shfit').onclick = e => { editS('Shape → video end', t => { t.start = Math.min(t.start, Math.max(0, total() - MINT)); t.dur = Math.max(MINT, total() - t.start); }); e.target.blur(); };
+$('#shend').onclick = e => { editS('Shape → playhead', t => { t.dur = Math.max(MINT, head - t.start); }); e.target.blur(); };
+$('#shdup').onclick = () => { const t = curShape(); if (!t) return; snap('Duplicate shape'); const n = { ...t, id: uid(), z: nextZ(), x: t.x + 0.03, y: t.y + 0.03 }; shapes.push(n); selShape = n.id; changed(); };
+$('#shdel').onclick = () => delShape();
+
+// ----- export: shape → PNG at the OUTPUT size (same path as the preview) -----
+function outAspect() {   // canvas ratio (w / h) of the exported video
+  if (canvas === 'orig') return srcA();
+  if (canvas === 'auto') { const cr = clips[0]?.crop; return cr ? cr.w * srcA() / cr.h : srcA(); }
+  const [a, b] = canvas.split(':').map(Number); return a / b;
+}
+function renderShapePng(t, W, H) {
+  const w = Math.max(2, Math.round(t.w * W)), h = Math.max(2, Math.round(t.h * H)), sw = (+t.sw || 0) * W;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'), p = new Path2D(shapeD(t.type, w, h, sw / 2, t.rad));
+  if (t.fill) { g.globalAlpha = t.fop ?? 1; g.fillStyle = t.fill; g.fill(p); g.globalAlpha = 1; }
+  if (sw > 0.01) { g.strokeStyle = t.sc; g.lineWidth = sw; g.lineJoin = 'round'; g.stroke(p); }
+  return { png: c.toDataURL('image/png'), wf: t.w, hf: t.h };
+}
+
+// ================= layers panel (what is in front / behind — drag to reorder) =================
+const layersEl = $('#layers');
+let layerSig = '', layerClickSkip = false;
+function unitInfo(u) {
+  const o = u.items[u.items.length - 1];
+  if (u.k === 'tx') return { th: '<b>T</b>', name: o.text.split('\n')[0] || '(empty)', tag: 'Text' + (isScr(o) ? ' · scrolling' : '') };
+  if (u.k === 'sh') return { th: shapeIcon(o.type, o.fill, o.sc), name: SHAPES[o.type] || o.type, tag: 'Shape' };
+  if (o.emoji) { const n = u.items.length; return { th: `<img src="/api/emoji/${o.emoji}.png" alt="">`, name: n > 1 ? `Emoji group (${n})` : imLabel(o), tag: 'Emoji' }; }
+  const a = asset(o.asset);
+  return { th: a ? `<img src="/api/assets/${a.id}/${a.vid ? 'thumb' : 'file'}" alt="">` : '🖼', name: a?.name || 'missing', tag: a?.vid ? 'Video' : 'Image' };
+}
+function renderLayers() {
+  if (!layersEl) return;
+  const units = layerUnits(), cs = selItem();
+  const rows = units.map(u => ({ u, info: unitInfo(u), sel: !!cs && u.items.includes(cs) }));
+  const sig = JSON.stringify([rows.map(r => [r.info.th, r.info.name, r.info.tag, r.sel, r.u.items[0].start, r.u.items[0].dur]), sel >= 0, clips.length, pid]);
+  if (sig === layerSig) return;
+  layerSig = sig;
+  const tm = t => `${(+t.start).toFixed(1)}–${(t.start + t.dur).toFixed(1)}s`;
+  layersEl.innerHTML = (rows.length ? '' : '<div class="lempty">No layers yet — add text, images, videos, shapes or emoji.</div>') +
+    rows.map((r, i) => `<div class="lrow${r.sel ? ' sel' : ''}" data-i="${i}" title="${esc(r.info.name)}"><span class="lh" title="Drag to reorder">⠿</span><span class="lth">${r.info.th}</span>` +
+      `<span class="lmid"><span class="ln">${esc(r.info.name)}</span><span class="lt">${r.info.tag} · ${tm(r.u.items[0])}</span></span>` +
+      `<button class="lb" data-m="up" title="Bring forward">▲</button><button class="lb" data-m="down" title="Send backward">▼</button></div>`).join('') +
+    `<div class="lrow base${sel >= 0 ? ' sel' : ''}" data-base="1" title="The main video is always the bottom layer"><span class="lh"></span><span class="lth">🎞</span><span class="lmid"><span class="ln">Main video</span><span class="lt">Base layer · always at the bottom</span></span></div>`;
+}
+function selectUnit(u) {
+  const o = u.items[u.items.length - 1];
+  clearSel(); if (u.k === 'tx') selText = o.id; else if (u.k === 'sh') selShape = o.id; else selImg = o.id;
+  render();
+  if (head < o.start || head >= o.start + o.dur) seek(o.start + 0.01);
+}
+layersEl.addEventListener('click', e => {
+  if (layerClickSkip) { layerClickSkip = false; return; }
+  const row = e.target.closest('.lrow'); if (!row) return;
+  if (row.dataset.base) { if (clips.length) { const i = tlToClip(head).i; clearSel(); sel = i; render(); } return; }
+  const units = layerUnits(), i = +row.dataset.i, u = units[i]; if (!u) return;
+  const m = e.target.closest('.lb')?.dataset.m;
+  if (!m) { selectUnit(u); return; }
+  const j = m === 'up' ? i - 1 : i + 1; if (j < 0 || j >= units.length) return;   // ▲ = one step toward the front
+  snap('Layer order'); units.splice(i, 1); units.splice(j, 0, u); applyUnits(units); changed();
+});
+layersEl.addEventListener('pointerdown', e => {   // drag a row up / down to reorder
+  const row = e.target.closest('.lrow');
+  if (!row || row.dataset.base || e.button || e.target.closest('button')) return;
+  const rows = [...layersEl.querySelectorAll('.lrow:not(.base)')], from = rows.indexOf(row);
+  const y0 = e.clientY, drop = document.createElement('div'); drop.id = 'ldrop';
+  let dragging = false, to = from;
+  row.setPointerCapture?.(e.pointerId);
+  const mv = ev => {
+    if (!dragging) { if (Math.abs(ev.clientY - y0) < 5) return; dragging = true; row.classList.add('drag'); layersEl.appendChild(drop); }
+    const others = rows.filter(r => r !== row);
+    to = others.filter(r => { const b = r.getBoundingClientRect(); return ev.clientY > b.top + b.height / 2; }).length;   // slot among the other rows
+    const ref = others[to], last = others[others.length - 1];
+    drop.style.top = (ref ? ref.offsetTop - 3 : last ? last.offsetTop + last.offsetHeight + 1 : 0) + 'px';
+    const lb = $('#libbody'), r = lb.getBoundingClientRect();   // auto-scroll the panel near its edges
+    if (ev.clientY < r.top + 28) lb.scrollTop -= 12; else if (ev.clientY > r.bottom - 28) lb.scrollTop += 12;
+  };
+  const up = () => {
+    row.removeEventListener('pointermove', mv); row.removeEventListener('pointerup', up); row.removeEventListener('pointercancel', up);
+    drop.remove(); row.classList.remove('drag');
+    if (!dragging) return;
+    layerClickSkip = true; setTimeout(() => layerClickSkip = false, 60);
+    if (to === from) return;
+    const units = layerUnits(), [u] = units.splice(from, 1); units.splice(to, 0, u);
+    snap('Reorder layers'); applyUnits(units); changed();
+    toast('Layer order changed');
+  };
+  row.addEventListener('pointermove', mv); row.addEventListener('pointerup', up); row.addEventListener('pointercancel', up);
+});
 
 // ================= FX: grain / vintage / dust / glitch =================
 const FXN = { grain: '🎞 Grain', vintage: '📼 Vintage', dust: '✨ Dust & scratches', glitch: '📺 Glitch', blur: '🌫 Blur (Gaussian)' };
@@ -1930,7 +2281,7 @@ function setLibTab(name) {
   localStorage.libtab = name;
 }
 document.querySelectorAll('#libtabs button').forEach(b => b.onclick = e => { setLibTab(b.dataset.tab); e.currentTarget.blur(); });
-setLibTab(['text', 'media', 'emoji', 'fx', 'audio'].includes(localStorage.libtab) ? localStorage.libtab : 'text');
+setLibTab(['text', 'media', 'shapes', 'emoji', 'fx', 'audio', 'layers'].includes(localStorage.libtab) ? localStorage.libtab : 'text');
 zkey = ''; updateStage();
 
 requestAnimationFrame(tick);
